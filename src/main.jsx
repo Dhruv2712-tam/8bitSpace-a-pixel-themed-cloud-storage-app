@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import {
-  createCloudFolder, loadCloud, saveCloudProfile, setCloudStar,
+  createCloudFolder, deleteCloudAccount, loadCloud, permanentlyDeleteCloudItem, saveCloudProfile, setCloudStar,
   setCloudTrash, signedFileUrl, uploadCloudFiles,
 } from './lib/cloud';
 import './styles.css';
@@ -63,7 +63,7 @@ function ProfileAvatar({ src, label = 'Dhruv profile photo' }) {
   return <img src={src} alt={label} />;
 }
 
-function Sidebar({ open, onClose, active, setActive, avatar, onProfile, onCreate, storage }) {
+function Sidebar({ open, onClose, active, setActive, avatar, name, onProfile, onCreate, storage }) {
   const usedGb = (storage.used / 1024 ** 3).toFixed(storage.used ? 2 : 0);
   const percent = storage.total ? Math.min(100, Math.round(storage.used / storage.total * 100)) : 0;
   return <aside className={`sidebar ${open ? 'is-open' : ''}`}>
@@ -88,16 +88,16 @@ function Sidebar({ open, onClose, active, setActive, avatar, onProfile, onCreate
     </div>
     <button className="account-card" onClick={onProfile} aria-label="Change profile photo">
       <span className="avatar avatar-me"><ProfileAvatar src={avatar} /></span>
-      <div><strong>Dhruv</strong><span>Explorer plan</span></div>
+      <div><strong>{name || 'Player'}</strong><span>Explorer plan</span></div>
       <MoreHorizontal className="account-more" />
     </button>
   </aside>;
 }
 
-function Header({ query, setQuery, onMenu, avatar, onProfile }) {
+function Header({ query, setQuery, onMenu, avatar, name, onProfile }) {
   return <header className="topbar">
     <button className="icon-button menu-button" onClick={onMenu} aria-label="Open navigation"><Menu /></button>
-    <div className="welcome"><span>GOOD MORNING, DHRUV</span><h1>Your cloud is looking clear.</h1></div>
+    <div className="welcome"><span>WELCOME, {(name || 'PLAYER').toUpperCase()}</span><h1>Your cloud is looking clear.</h1></div>
     <label className="search-box">
       <Search size={18} /><span className="sr-only">Search your cloud</span>
       <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search your cloud" />
@@ -112,7 +112,7 @@ function Header({ query, setQuery, onMenu, avatar, onProfile }) {
   </header>;
 }
 
-function AvatarPicker({ current, onSelect, onClose, profile, onSave, onSignOut, onResetPassword }) {
+function AvatarPicker({ current, onSelect, onClose, profile, onSave, onSignOut, onResetPassword, onChangeEmail, onDeleteAccount }) {
   const [error, setError] = useState('');
   const [tab, setTab] = useState('Photo');
   const [form, setForm] = useState(profile);
@@ -121,18 +121,17 @@ function AvatarPicker({ current, onSelect, onClose, profile, onSave, onSignOut, 
     if (!file) return;
     if (!file.type.startsWith('image/')) { setError('Choose an image file.'); return; }
     if (file.size > 5 * 1024 * 1024) { setError('Image must be smaller than 5 MB.'); return; }
-    const reader = new FileReader();
-    reader.onload = () => { onSelect(reader.result); setError(''); };
-    reader.readAsDataURL(file);
+    const preview = URL.createObjectURL(file);
+    onSelect(preview); setForm(value => ({ ...value, avatarFile: file })); setError('');
   };
   return <div className="profile-modal-layer" role="presentation" onMouseDown={e => e.target === e.currentTarget && onClose()}>
     <section className="profile-modal profile-settings" role="dialog" aria-modal="true" aria-labelledby="profile-title">
       <div className="profile-modal-head"><div><span>PIXEL IDENTITY</span><h2 id="profile-title">Choose your player</h2></div><button className="icon-button" onClick={onClose} aria-label="Close profile picker"><X /></button></div>
       <div className="settings-tabs" role="tablist">{['Account','Photo','Preferences','Security'].map(name=><button role="tab" aria-selected={tab===name} className={tab===name?'active':''} onClick={()=>setTab(name)} key={name}>{name}</button>)}</div>
-      {tab === 'Account' && <div className="settings-page"><label>Display name<input value={form.name||''} onChange={e=>setForm({...form,name:e.target.value})}/></label><label>Email address<input type="email" value={form.email||''} readOnly/></label><div className="plan-panel"><span>Current plan</span><strong>Explorer · 100 GB</strong></div><button className="sign-out-button" onClick={onSignOut}>Sign out of 8bitSpace</button></div>}
+      {tab === 'Account' && <div className="settings-page"><label>Display name<input value={form.name||''} onChange={e=>setForm({...form,name:e.target.value})}/></label><label>Email address<input type="email" value={form.email||''} onChange={e=>setForm({...form,email:e.target.value})}/></label><button className="account-action" onClick={()=>onChangeEmail(form.email)}>Update email address</button><div className="plan-panel"><span>Current plan</span><strong>Explorer · 100 GB</strong></div><button className="sign-out-button" onClick={onSignOut}>Sign out of 8bitSpace</button><div className="danger-zone"><b>Danger zone</b><small>Permanently removes your account, folders, files, and avatars.</small><button onClick={onDeleteAccount}><Trash2/>Delete my account</button></div></div>}
       {tab === 'Photo' && <><div className="current-profile"><span className="avatar current-avatar"><ProfileAvatar src={current} /></span><div><strong>{profile.name}</strong><small>Your profile photo appears across 8bitSpace.</small></div></div>
       <div className="avatar-grid" role="list" aria-label="Profile photo choices">
-        {avatarChoices.map((src, index) => <button key={src} role="listitem" className={current === src ? 'chosen' : ''} onClick={() => onSelect(src)} aria-label={`Choose pixel avatar ${index + 1}`}><img src={src} alt="" />{current === src && <i>✓</i>}</button>)}
+        {avatarChoices.map((src, index) => <button key={src} role="listitem" className={current === src ? 'chosen' : ''} onClick={() => {onSelect(src);setForm(value=>({...value,avatarFile:null,avatarPath:null}))}} aria-label={`Choose pixel avatar ${index + 1}`}><img src={src} alt="" />{current === src && <i>✓</i>}</button>)}
       </div>
       <label className="avatar-upload"><Upload size={18} /><span><b>Upload your own</b><small>PNG, JPG or WEBP · max 5 MB</small></span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={upload} /></label>
       {error && <p className="avatar-error" role="alert">{error}</p>}</>}
@@ -160,25 +159,26 @@ function IntroSequence({ onFinish }) {
   </div>;
 }
 
-function FileBrowser({ query, selected, setSelected, sourceFiles, active, currentFolder, onOpenFolder, onBack, onUpload, onRequestUpload }) {
+function FileBrowser({ query, selected, setSelected, sourceFiles, active, folderStack, onOpenFolder, onNavigate, onBack, onUpload, onRequestUpload }) {
   const [view, setView] = useState('list');
   const [checked, setChecked] = useState([]);
+  const currentFolder = folderStack.at(-1) || null;
   const files = useMemo(() => sourceFiles.filter(f => {
     if (active === 'Trash' && !f.trashed) return false;
     if (active !== 'Trash' && f.trashed) return false;
     if (active === 'Starred' && !f.starred) return false;
     if (active === 'Photos' && !['image','video'].includes(f.type)) return false;
-    if (active === 'My Cloud' && currentFolder && f.folderId !== currentFolder.id) return false;
+    if (active === 'My Cloud' && currentFolder && (f.type === 'folder' ? f.parentId !== currentFolder.id : f.folderId !== currentFolder.id)) return false;
     if (active === 'My Cloud' && !currentFolder && (f.type !== 'folder' || f.parentId)) return false;
     return f.name.toLowerCase().includes(query.toLowerCase());
   }), [query, sourceFiles, active, currentFolder]);
   const isRoot = active === 'My Cloud' && !currentFolder;
-  const title = isRoot ? 'All folders' : currentFolder ? 'All files' : active;
+  const title = isRoot ? 'All folders' : currentFolder ? 'Folders & files' : active;
   const toggle = (id) => setChecked(c => c.includes(id) ? c.filter(x => x !== id) : [...c, id]);
   const openItem = file => file.type === 'folder' ? onOpenFolder(file) : setSelected(file);
   return <section className="section-block file-section" aria-labelledby="files-title">
     <div className="section-heading file-heading">
-      <div>{currentFolder ? <button className="breadcrumb-back" onClick={onBack}>← MY CLOUD / {currentFolder.name}</button> : <span className="eyebrow">MY CLOUD / HOME</span>}<h2 id="files-title">{title} <em>{files.length}</em></h2></div>
+      <div>{currentFolder ? <div className="breadcrumbs"><button onClick={()=>onNavigate(-1)}>MY CLOUD</button>{folderStack.map((folder,index)=><React.Fragment key={folder.id}><span>/</span><button aria-current={index===folderStack.length-1?'page':undefined} onClick={()=>onNavigate(index)}>{folder.name}</button></React.Fragment>)}</div> : <span className="eyebrow">MY CLOUD / HOME</span>}<h2 id="files-title">{title} <em>{files.length}</em></h2></div>
       <div className="file-tools">
         <div className="view-toggle" aria-label="View style">
           <button className={view === 'list' ? 'active' : ''} onClick={() => setView('list')} aria-label="List view"><LayoutList /></button>
@@ -187,7 +187,7 @@ function FileBrowser({ query, selected, setSelected, sourceFiles, active, curren
         {currentFolder ? <label className="upload-button"><Upload size={17} /> Upload<input type="file" multiple onChange={e=>onUpload(e,currentFolder.id)}/></label> : <button className="upload-button root-upload" onClick={onRequestUpload}><Upload size={17}/>Upload</button>}
       </div>
     </div>
-    {files.length === 0 ? <div className="empty-state"><CloudSun /><h3>{isRoot?'Create your first folder':'This folder is empty'}</h3><p>{isRoot?'Files in 8bitSpace must always live inside a folder.':'Use Upload to add files to this folder.'}</p>{isRoot&&<button className="empty-create" onClick={onRequestUpload}><Folder/>Create a folder</button>}</div> : view === 'list' ?
+    {files.length === 0 ? <div className="empty-state"><CloudSun /><h3>{isRoot?'Create your first folder':'This folder is empty'}</h3><p>{isRoot?'Files in 8bitSpace must always live inside a folder.':'Create a subfolder or upload files here.'}</p><button className="empty-create" onClick={onRequestUpload}><Folder/>{isRoot?'Create a folder':'Add something'}</button></div> : view === 'list' ?
       <div className="table-wrap"><table>
         <thead><tr><th><input type="checkbox" aria-label="Select all files" checked={checked.length === files.length && files.length > 0} onChange={() => setChecked(checked.length === files.length ? [] : files.map(f => f.id))} /></th><th>Name</th><th>Status</th><th>Owner</th><th>Last modified</th><th>Size</th><th><span className="sr-only">Actions</span></th></tr></thead>
         <tbody>{files.map(file => <tr key={file.id} className={`${selected?.id === file.id ? 'selected' : ''}`} onClick={() => openItem(file)}>
@@ -204,13 +204,13 @@ function FileBrowser({ query, selected, setSelected, sourceFiles, active, curren
   </section>;
 }
 
-function CreateDialog({ onClose, onCreateFolder, onUpload, folders }) {
+function CreateDialog({ onClose, onCreateFolder, onUpload, folders, currentFolder }) {
   const [name,setName]=useState('');
   const [mode,setMode]=useState(folders.length?'choose':'new');
   const [folderId,setFolderId]=useState('');
   return <div className="profile-modal-layer" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><section className="create-dialog" role="dialog" aria-modal="true" aria-labelledby="create-title"><div className="profile-modal-head"><div><span>FOLDER-FIRST STORAGE</span><h2 id="create-title">{mode==='new'?(folders.length?'Create a new folder':'Create your first folder'):'Choose where to continue'}</h2></div><button className="icon-button" onClick={onClose} aria-label="Close create dialog"><X/></button></div>
     {folders.length>0&&mode==='choose'&&<div className="folder-choice"><button onClick={()=>setMode('new')}><Plus/><span><b>Create a new folder</b><small>Start a separate space</small></span></button><div className="folder-list-label">OR OPEN AN EXISTING FOLDER</div>{folders.map(folder=><button key={folder.id} onClick={()=>setFolderId(folder.id)} className={folderId===folder.id?'selected':''}><Folder/><span><b>{folder.name}</b><small>Choose this folder</small></span><ChevronRight/></button>)}</div>}
-    {(mode==='new'||folders.length===0)&&<form onSubmit={e=>{e.preventDefault();if(name.trim())onCreateFolder(name)}}><label>Folder name<input value={name} onChange={e=>setName(e.target.value)} placeholder="Untitled folder" autoFocus/></label><button type="submit"><Folder/>Create folder</button></form>}
+    {(mode==='new'||folders.length===0)&&<form onSubmit={e=>{e.preventDefault();if(name.trim())onCreateFolder(name,currentFolder?.id||null)}}><label>Folder name<input value={name} onChange={e=>setName(e.target.value)} placeholder="Untitled folder" autoFocus/></label>{currentFolder&&<p className="folder-location">Inside <b>{currentFolder.name}</b></p>}<button type="submit"><Folder/>Create folder</button></form>}
     {folders.length===0&&<div className="upload-blocked"><LockKeyhole/><span><b>Upload locked</b><small>You must create a folder before uploading any files.</small></span></div>}
     {folderId&&<div className="folder-upload-ready"><p>Files will be uploaded inside <b>{folders.find(f=>f.id===folderId)?.name}</b>.</p><label className="upload-button"><Upload/>Choose files<input type="file" multiple onChange={e=>onUpload(e,folderId)}/></label></div>}
     {mode==='new'&&folders.length>0&&<button className="dialog-back" onClick={()=>setMode('choose')}>← Back to folders</button>}
@@ -231,7 +231,7 @@ function DetailsPanel({ file, onClose, onAction }) {
     <div className="details-head"><span>FILE DETAILS</span><button className="icon-button" onClick={onClose} aria-label="Close details"><X /></button></div>
     <div className={`preview-box ${file.color}`}><IconFor type={file.type} size={54} /><span>8BIT</span></div>
     <h3>{file.name}</h3><p className="muted">{file.type.toUpperCase()} · {file.size}</p>
-    <div className="detail-actions"><button onClick={()=>onAction('share',file)}><Share2 />Share</button><button onClick={()=>onAction('download',file)}><Download />Download</button><button onClick={()=>onAction('star',file)}><Star fill={file.starred?'currentColor':'none'}/>{file.starred?'Unstar':'Star'}</button><button onClick={()=>onAction(file.trashed?'restore':'trash',file)}>{file.trashed?<Archive/>:<Trash2/>}{file.trashed?'Restore':'Trash'}</button></div>
+    <div className="detail-actions">{!file.trashed&&<><button onClick={()=>onAction('share',file)}><Share2 />Share</button><button onClick={()=>onAction('download',file)}><Download />Download</button><button onClick={()=>onAction('star',file)}><Star fill={file.starred?'currentColor':'none'}/>{file.starred?'Unstar':'Star'}</button></>}<button onClick={()=>onAction(file.trashed?'restore':'trash',file)}>{file.trashed?<Archive/>:<Trash2/>}{file.trashed?'Restore':'Trash'}</button>{file.trashed&&<button className="permanent-delete" onClick={()=>onAction('delete',file)}><Trash2/>Delete forever</button>}</div>
     <dl><div><dt>Owner</dt><dd>{file.owner}</dd></div><div><dt>Modified</dt><dd>{file.modified}</dd></div><div><dt>Status</dt><dd>{file.status}</dd></div><div><dt>Folder</dt><dd>Current folder</dd></div></dl>
   </aside>;
 }
@@ -269,9 +269,25 @@ function AuthScreen() {
   </div>;
 }
 
+function RecoveryScreen({ onDone }) {
+  const [password,setPassword]=useState('');
+  const [confirm,setConfirm]=useState('');
+  const [message,setMessage]=useState('');
+  const [pending,setPending]=useState(false);
+  const submit=async(event)=>{event.preventDefault();if(password!==confirm){setMessage('Passwords do not match.');return}setPending(true);const {error}=await supabase.auth.updateUser({password});if(error){setMessage(error.message);setPending(false);return}await supabase.auth.signOut();setPending(false);onDone()};
+  return <div className="auth-shell"><PixelLandscape/><div className="atmosphere"/><main className="auth-card"><div className="auth-brand"><LockKeyhole/><div><strong>8bitSpace</strong><span>SECURE RECOVERY</span></div></div><div className="auth-copy"><span>NEW ACCESS KEY</span><h1>Set a new password.</h1><p>Choose at least 8 characters, then sign in again.</p></div><form className="auth-form" onSubmit={submit}><label>New password<input type="password" minLength={8} required autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)}/></label><label>Confirm password<input type="password" minLength={8} required autoComplete="new-password" value={confirm} onChange={e=>setConfirm(e.target.value)}/></label>{message&&<p className="auth-message" role="alert">{message}</p>}<button disabled={pending}>{pending?'Saving…':'Set new password'}</button></form></main></div>;
+}
+
+function ConfirmDialog({ title, message, phrase, confirmLabel, onCancel, onConfirm }) {
+  const [value,setValue]=useState('');
+  const [pending,setPending]=useState(false);
+  return <div className="profile-modal-layer"><section className="confirm-dialog" role="alertdialog" aria-modal="true"><div className="profile-modal-head"><div><span>PERMANENT ACTION</span><h2>{title}</h2></div><button className="icon-button" onClick={onCancel}><X/></button></div><p>{message}</p><label>Type <b>{phrase}</b> to continue<input autoFocus value={value} onChange={e=>setValue(e.target.value)}/></label><div className="confirm-actions"><button onClick={onCancel}>Cancel</button><button className="danger-confirm" disabled={value!==phrase||pending} onClick={async()=>{setPending(true);await onConfirm();setPending(false)}}>{pending?'Working…':confirmLabel}</button></div></section></div>
+}
+
 function App() {
   const [user, setUser] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [recoveryMode,setRecoveryMode]=useState(location.search.includes('recovery=1')||location.hash.includes('type=recovery'));
   const [active, setActive] = useState('My Cloud');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState(null);
@@ -280,12 +296,14 @@ function App() {
   const [avatar, setAvatar] = useState(avatarChoices[0]);
   const [introDone, setIntroDone] = useState(false);
   const [files, setFiles] = useState([]);
-  const [currentFolder, setCurrentFolder] = useState(null);
+  const [folderStack, setFolderStack] = useState([]);
   const [profile, setProfile] = useState({name:'Player',email:'',avatar:avatarChoices[0],notifications:true,theme:'pixel-night'});
   const [activity, setActivity] = useState([]);
   const [storage, setStorage] = useState({used:0,total:100*1024**3,files:0,trash:0});
   const [createOpen, setCreateOpen] = useState(false);
   const [toast, setToast] = useState('');
+  const [uploadProgress,setUploadProgress]=useState(null);
+  const [confirmation,setConfirmation]=useState(null);
   const special = ['Activity','Storage'].includes(active);
   const refresh = async () => {
     if (!user) return;
@@ -294,38 +312,43 @@ function App() {
   };
   useEffect(()=>{
     supabase.auth.getSession().then(({data})=>{setUser(data.session?.user||null);setAuthLoading(false)});
-    const {data:{subscription}}=supabase.auth.onAuthStateChange((_event,session)=>{setUser(session?.user||null);setAuthLoading(false)});
+    const {data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{if(event==='PASSWORD_RECOVERY')setRecoveryMode(true);setUser(session?.user||null);setAuthLoading(false)});
     return ()=>subscription.unsubscribe();
   },[]);
   useEffect(()=>{if(user)refresh();else{setFiles([]);setActivity([])}},[user]);
   const notify=(message)=>{setToast(message);window.setTimeout(()=>setToast(''),2600)};
-  const uploadFiles=async(e,folderId)=>{const chosen=[...(e.target.files||[])];if(!chosen.length)return;if(!folderId){notify('You must create or open a folder first.');setCreateOpen(true);e.target.value='';return}try{await uploadCloudFiles(user,folderId,chosen);await refresh();notify(`${chosen.length} file${chosen.length===1?'':'s'} uploaded`);setCreateOpen(false);const folder=files.find(f=>f.id===folderId);if(folder)setCurrentFolder(folder)}catch(err){notify(err.message)}e.target.value=''};
-  const createFolder=async(name)=>{try{await createCloudFolder(user,name);await refresh();notify('Folder created');setCreateOpen(false)}catch(err){notify(err.message)}};
+  const uploadFiles=async(e,folderId)=>{const chosen=[...(e.target.files||[])];if(!chosen.length)return;if(!folderId){notify('You must create or open a folder first.');setCreateOpen(true);e.target.value='';return}try{setUploadProgress({name:chosen[0].name,percent:0});await uploadCloudFiles(user,folderId,chosen,setUploadProgress);await refresh();notify(`${chosen.length} file${chosen.length===1?'':'s'} uploaded`);setCreateOpen(false);const folder=files.find(f=>f.id===folderId);if(folder&&!folderStack.some(item=>item.id===folder.id))setFolderStack([folder])}catch(err){notify(err.message)}finally{setUploadProgress(null)}e.target.value=''};
+  const createFolder=async(name,parentId=null)=>{try{await createCloudFolder(user,name,parentId);await refresh();notify(parentId?'Subfolder created':'Folder created');setCreateOpen(false)}catch(err){notify(err.message)}};
   const saveProfile=async(next)=>{try{const saved=await saveCloudProfile(user,next);setProfile(saved);setAvatar(saved.avatar);notify('Profile saved')}catch(err){notify(err.message)}};
-  const fileAction=async(action,file)=>{try{if(action==='share'){const url=await signedFileUrl(file,3600);await navigator.clipboard.writeText(url);notify('Private link copied · expires in 1 hour');return}if(action==='download'){const url=await signedFileUrl(file,300,true);window.open(url,'_blank','noopener,noreferrer');return}if(action==='star'){await setCloudStar(file,!file.starred);await refresh();notify(file.starred?'Removed from starred':'Added to starred');return}await setCloudTrash(user,file,action==='trash');setSelected(null);await refresh();notify(action==='trash'?'Moved to trash':'File restored')}catch(err){notify(err.message)}};
+  const fileAction=async(action,file)=>{try{if(action==='delete'){setConfirmation({kind:'item',item:file});return}if(action==='share'){const url=await signedFileUrl(file,3600);await navigator.clipboard.writeText(url);notify('Private link copied · expires in 1 hour');return}if(action==='download'){const url=await signedFileUrl(file,300,true);window.open(url,'_blank','noopener,noreferrer');return}if(action==='star'){await setCloudStar(file,!file.starred);await refresh();notify(file.starred?'Removed from starred':'Added to starred');return}await setCloudTrash(user,file,action==='trash');setSelected(null);await refresh();notify(action==='trash'?'Moved to trash':'Item restored')}catch(err){notify(err.message)}};
+  const changeEmail=async(email)=>{if(email===profile.email){notify('That is already your email address.');return}const {error}=await supabase.auth.updateUser({email:email.trim()});notify(error?error.message:'Confirmation links sent. Your email changes after verification.')};
+  const runConfirmation=async()=>{try{if(confirmation.kind==='account'){await deleteCloudAccount();await supabase.auth.signOut();setProfileOpen(false)}else{await permanentlyDeleteCloudItem(user,confirmation.item);setSelected(null);await refresh();notify('Permanently deleted')}setConfirmation(null)}catch(error){notify(error.message||'The action could not be completed.');setConfirmation(null)}};
   useEffect(() => {
     const onKey = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); document.querySelector('.search-box input')?.focus(); } if (e.key === 'Escape') { setSelected(null); setNavOpen(false); } };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, []);
-  useEffect(()=>{setCurrentFolder(null);setSelected(null)},[active]);
+  useEffect(()=>{setFolderStack([]);setSelected(null)},[active]);
   const rootFolders=files.filter(f=>f.type==='folder'&&!f.trashed&&!f.parentId);
   if (authLoading) return <div className="auth-shell"><PixelLandscape/><div className="atmosphere"/><div className="auth-loading"><Cloud/>CONNECTING TO YOUR CLOUD…</div></div>;
+  if (recoveryMode) return <RecoveryScreen onDone={()=>{history.replaceState({},'',location.pathname);setRecoveryMode(false)}}/>;
   if (!user) return <AuthScreen/>;
   return <div className="app-shell">
     <PixelLandscape /><div className="atmosphere" />
     {navOpen && <button className="scrim" onClick={() => setNavOpen(false)} aria-label="Close navigation" />}
     {!introDone && <IntroSequence onFinish={() => setIntroDone(true)} />}
-    <Sidebar open={navOpen} onClose={() => setNavOpen(false)} active={active} setActive={setActive} avatar={avatar} onProfile={() => setProfileOpen(true)} onCreate={()=>setCreateOpen(true)} storage={storage} />
+    <Sidebar open={navOpen} onClose={() => setNavOpen(false)} active={active} setActive={setActive} avatar={avatar} name={profile.name} onProfile={() => setProfileOpen(true)} onCreate={()=>setCreateOpen(true)} storage={storage} />
     <main className={`workspace ${selected ? 'with-details' : ''}`}>
-      <Header query={query} setQuery={setQuery} onMenu={() => setNavOpen(true)} avatar={avatar} onProfile={() => setProfileOpen(true)} />
+      <Header query={query} setQuery={setQuery} onMenu={() => setNavOpen(true)} avatar={avatar} name={profile.name} onProfile={() => setProfileOpen(true)} />
       <div className="content-scroll">
-        {special ? <SpecialView active={active} activity={activity} storage={storage}/> : <FileBrowser query={query} selected={selected} setSelected={setSelected} sourceFiles={files} active={active} currentFolder={currentFolder} onOpenFolder={folder=>{setCurrentFolder(folder);setSelected(null)}} onBack={()=>{setCurrentFolder(null);setSelected(null)}} onUpload={uploadFiles} onRequestUpload={()=>setCreateOpen(true)}/>} 
+        {special ? <SpecialView active={active} activity={activity} storage={storage}/> : <FileBrowser query={query} selected={selected} setSelected={setSelected} sourceFiles={files} active={active} folderStack={folderStack} onOpenFolder={folder=>{setFolderStack(stack=>[...stack,folder]);setSelected(null)}} onNavigate={index=>{setFolderStack(stack=>index<0?[]:stack.slice(0,index+1));setSelected(null)}} onBack={()=>{setFolderStack(stack=>stack.slice(0,-1));setSelected(null)}} onUpload={uploadFiles} onRequestUpload={()=>setCreateOpen(true)}/>}
         <footer><span><ShieldCheck size={14}/> Protected & synced</span><span>8bitSpace · peaceful files, serious storage</span></footer>
       </div>
     </main>
     <DetailsPanel file={selected} onClose={() => setSelected(null)} onAction={fileAction} />
-    {profileOpen && <AvatarPicker current={avatar} onSelect={setAvatar} onClose={() => setProfileOpen(false)} profile={profile} onSave={saveProfile} onSignOut={async()=>{setProfileOpen(false);await supabase.auth.signOut()}} onResetPassword={async()=>{const {error}=await supabase.auth.resetPasswordForEmail(profile.email,{redirectTo:location.origin});notify(error?error.message:'Password-reset email sent')}} />}
-    {createOpen && <CreateDialog onClose={()=>setCreateOpen(false)} onCreateFolder={createFolder} onUpload={uploadFiles} folders={rootFolders}/>} 
+    {profileOpen && <AvatarPicker current={avatar} onSelect={setAvatar} onClose={() => setProfileOpen(false)} profile={profile} onSave={saveProfile} onSignOut={async()=>{setProfileOpen(false);await supabase.auth.signOut()}} onResetPassword={async()=>{const {error}=await supabase.auth.resetPasswordForEmail(profile.email,{redirectTo:`${location.origin}/?recovery=1`});notify(error?error.message:'Password-reset email sent')}} onChangeEmail={changeEmail} onDeleteAccount={()=>setConfirmation({kind:'account'})} />}
+    {createOpen && <CreateDialog onClose={()=>setCreateOpen(false)} onCreateFolder={createFolder} onUpload={uploadFiles} folders={rootFolders} currentFolder={folderStack.at(-1)||null}/>}
+    {confirmation&&<ConfirmDialog title={confirmation.kind==='account'?'Delete your account?':`Delete ${confirmation.item.name}?`} message={confirmation.kind==='account'?'This permanently deletes your profile, every folder, every file, and all stored avatars. This cannot be undone.':'The item and its stored data will be removed forever. This cannot be undone.'} phrase={confirmation.kind==='account'?'DELETE ACCOUNT':'DELETE'} confirmLabel={confirmation.kind==='account'?'Delete account':'Delete forever'} onCancel={()=>setConfirmation(null)} onConfirm={runConfirmation}/>}
+    {uploadProgress&&<div className="upload-progress" role="status"><div><span>UPLOADING</span><b>{uploadProgress.name}</b></div><strong>{uploadProgress.percent}%</strong><div className="progress-track"><i style={{width:`${uploadProgress.percent}%`}}/></div></div>}
     {toast && <div className="toast" role="status"><Cloud size={16}/>{toast}</div>}
     <button className="floating-create" aria-label="Create new" onClick={()=>setCreateOpen(true)}><Plus /></button>
   </div>;

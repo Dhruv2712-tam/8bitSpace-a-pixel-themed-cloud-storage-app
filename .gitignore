@@ -4,4 +4,4 @@ dist/
 .env.*
 !.env.example
 server/uploads/
-
+.vite-preview*.log
