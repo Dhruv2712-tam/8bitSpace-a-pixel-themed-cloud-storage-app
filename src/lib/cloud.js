@@ -1,8 +1,6 @@
 import * as tus from 'tus-js-client'
 import { supabase, supabasePublishableKey, supabaseUrl } from './supabase'
 
-export const SPACE_LIMIT = 100 * 1024 ** 3
-
 const typeFromMime = (mime = '', name = '') => {
   if (mime.startsWith('image/')) return 'image'
   if (mime.startsWith('video/')) return 'video'
@@ -31,7 +29,7 @@ const modifiedLabel = value => {
 const mapFolder = row => ({
   id: row.id, name: row.name, type: 'folder', parentId: row.parent_id,
   modified: modifiedLabel(row.updated_at), size: '—', bytes: 0, owner: 'You',
-  tag: 'Folder', color: 'blue', status: 'Synced', members: 1,
+  tag: 'Folder', color: 'blue', status: 'Stored', members: 1,
   starred: row.is_starred, trashed: Boolean(row.trashed_at),
 })
 
@@ -40,7 +38,7 @@ const mapFile = row => ({
   folderId: row.folder_id, storagePath: row.storage_path,
   modified: modifiedLabel(row.updated_at), size: sizeLabel(row.size_bytes),
   bytes: row.size_bytes, owner: 'You', tag: row.tag || 'Uploaded', color: 'blue',
-  status: 'Synced', members: 1, starred: row.is_starred,
+  status: 'Stored', members: 1, starred: row.is_starred,
   trashed: Boolean(row.trashed_at),
 })
 
@@ -63,7 +61,7 @@ export async function loadCloud(user) {
   if (!profileRow) {
     profileRow = must(await supabase.from('profiles').insert({ id: user.id, display_name: user.email?.split('@')[0] || 'Player' }).select().single())
   }
-  const used = files.filter(file => !file.trashed).reduce((total, file) => total + file.bytes, 0)
+  const used = files.reduce((total, file) => total + file.bytes, 0)
   let avatar = profileRow.avatar_url || '/avatars/avatar-01.jpeg'
   const avatarPath = avatar.startsWith('storage:') ? avatar.slice(8) : null
   if (avatarPath) {
@@ -77,7 +75,12 @@ export async function loadCloud(user) {
       avatar, avatarPath,
       notifications: profileRow.notifications, theme: profileRow.theme,
     },
-    storage: { used, total: SPACE_LIMIT, files: files.filter(file => !file.trashed).length, trash: files.filter(file => file.trashed).length },
+    storage: {
+      used,
+      files: files.filter(file => !file.trashed).length,
+      folders: folders.filter(folder => !folder.trashed).length,
+      trash: [...files, ...folders].filter(item => item.trashed).length,
+    },
   }
 }
 

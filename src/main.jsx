@@ -1,11 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
-  Activity, Archive, Bell, ChevronDown, ChevronRight, Clock3, Cloud,
-  CloudSun, Computer, Download, File, FileImage, FilePlus2, FileText,
-  Folder, FolderInput, Grid2X2, HardDrive, HelpCircle, Image, LayoutList,
-  Link2, LockKeyhole, Menu, MoreHorizontal, Music2, Plus, Search, Settings,
-  Share2, ShieldCheck, Star, Tag, Trash2, Upload, Users, Video, WifiOff, X
+  Activity, Archive, ChevronRight, Clock3, Cloud, CloudSun, Download, File,
+  FileImage, FileText, Folder, Grid2X2, HardDrive, Image, LayoutList,
+  LockKeyhole, Menu, MoreHorizontal, Music2, Plus, Search, Share2,
+  ShieldCheck, Star, Trash2, Upload, Video, X
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import {
@@ -59,20 +58,25 @@ function PixelLandscape() {
   </div>;
 }
 
-function ProfileAvatar({ src, label = 'Dhruv profile photo' }) {
+function ProfileAvatar({ src, label = 'Profile photo' }) {
   return <img src={src} alt={label} />;
 }
 
+const storageLabel = bytes => {
+  if (!bytes) return '0 B';
+  const units=['B','KB','MB','GB','TB'];
+  const unit=Math.min(Math.floor(Math.log(bytes)/Math.log(1024)),units.length-1);
+  return `${(bytes/1024**unit).toFixed(unit?2:0)} ${units[unit]}`;
+};
+
 function Sidebar({ open, onClose, active, setActive, avatar, name, onProfile, onCreate, storage }) {
-  const usedGb = (storage.used / 1024 ** 3).toFixed(storage.used ? 2 : 0);
-  const percent = storage.total ? Math.min(100, Math.round(storage.used / storage.total * 100)) : 0;
   return <aside className={`sidebar ${open ? 'is-open' : ''}`}>
     <div className="brand-row">
       <div className="brand-mark"><Cloud size={19} fill="currentColor" /></div>
       <div><strong>8bitSpace</strong><span>cloud workspace</span></div>
       <button className="icon-button mobile-close" onClick={onClose} aria-label="Close navigation"><X /></button>
     </div>
-    <button className="create-button" onClick={onCreate}><Plus size={19} /> Create New <ChevronDown size={16} /></button>
+    <button className="create-button" onClick={onCreate}><Plus size={19} /> Create New</button>
     <nav aria-label="Main navigation">
       {navGroups.map((group, gi) => <div className="nav-group" key={gi}>
         {group.map(([label, Icon]) => <button key={label} className={`nav-item ${active === label ? 'active' : ''}`} onClick={() => { setActive(label); onClose(); }}>
@@ -81,14 +85,13 @@ function Sidebar({ open, onClose, active, setActive, avatar, name, onProfile, on
       </div>)}
     </nav>
     <div className="storage-card">
-      <div className="storage-title"><span>STORAGE</span><strong>{percent}%</strong></div>
-      <div className="pixel-meter"><i style={{width:`${percent}%`}} /></div>
-      <p><b>{usedGb} GB</b> of 100 GB used</p>
-      <button>View storage</button>
+      <div className="storage-title"><span>YOUR STORAGE</span><strong>{storage.files || 0} files</strong></div>
+      <p><b>{storageLabel(storage.used)}</b> stored across your account</p>
+      <button onClick={()=>{setActive('Storage');onClose()}}>View details</button>
     </div>
     <button className="account-card" onClick={onProfile} aria-label="Change profile photo">
       <span className="avatar avatar-me"><ProfileAvatar src={avatar} /></span>
-      <div><strong>{name || 'Player'}</strong><span>Explorer plan</span></div>
+      <div><strong>{name || 'Player'}</strong><span>Signed-in account</span></div>
       <MoreHorizontal className="account-more" />
     </button>
   </aside>;
@@ -97,16 +100,13 @@ function Sidebar({ open, onClose, active, setActive, avatar, name, onProfile, on
 function Header({ query, setQuery, onMenu, avatar, name, onProfile }) {
   return <header className="topbar">
     <button className="icon-button menu-button" onClick={onMenu} aria-label="Open navigation"><Menu /></button>
-    <div className="welcome"><span>WELCOME, {(name || 'PLAYER').toUpperCase()}</span><h1>Your cloud is looking clear.</h1></div>
+    <div className="welcome"><span>WELCOME, {(name || 'PLAYER').toUpperCase()}</span><h1>Your private folders, in one place.</h1></div>
     <label className="search-box">
       <Search size={18} /><span className="sr-only">Search your cloud</span>
       <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search your cloud" />
-      <kbd>⌘ K</kbd>
+      <kbd>CTRL K</kbd>
     </label>
     <div className="header-actions">
-      <button className="icon-button" aria-label="Help"><HelpCircle /></button>
-      <button className="icon-button" aria-label="Settings"><Settings /></button>
-      <button className="icon-button notification" aria-label="Notifications"><Bell /><i /></button>
       <button className="avatar avatar-me" aria-label="Open profile photo menu" onClick={onProfile}><ProfileAvatar src={avatar} /></button>
     </div>
   </header>;
@@ -127,15 +127,14 @@ function AvatarPicker({ current, onSelect, onClose, profile, onSave, onSignOut, 
   return <div className="profile-modal-layer" role="presentation" onMouseDown={e => e.target === e.currentTarget && onClose()}>
     <section className="profile-modal profile-settings" role="dialog" aria-modal="true" aria-labelledby="profile-title">
       <div className="profile-modal-head"><div><span>PIXEL IDENTITY</span><h2 id="profile-title">Choose your player</h2></div><button className="icon-button" onClick={onClose} aria-label="Close profile picker"><X /></button></div>
-      <div className="settings-tabs" role="tablist">{['Account','Photo','Preferences','Security'].map(name=><button role="tab" aria-selected={tab===name} className={tab===name?'active':''} onClick={()=>setTab(name)} key={name}>{name}</button>)}</div>
-      {tab === 'Account' && <div className="settings-page"><label>Display name<input value={form.name||''} onChange={e=>setForm({...form,name:e.target.value})}/></label><label>Email address<input type="email" value={form.email||''} onChange={e=>setForm({...form,email:e.target.value})}/></label><button className="account-action" onClick={()=>onChangeEmail(form.email)}>Update email address</button><div className="plan-panel"><span>Current plan</span><strong>Explorer · 100 GB</strong></div><button className="sign-out-button" onClick={onSignOut}>Sign out of 8bitSpace</button><div className="danger-zone"><b>Danger zone</b><small>Permanently removes your account, folders, files, and avatars.</small><button onClick={onDeleteAccount}><Trash2/>Delete my account</button></div></div>}
+      <div className="settings-tabs" role="tablist">{['Account','Photo','Security'].map(name=><button role="tab" aria-selected={tab===name} className={tab===name?'active':''} onClick={()=>setTab(name)} key={name}>{name}</button>)}</div>
+      {tab === 'Account' && <div className="settings-page"><label>Display name<input value={form.name||''} onChange={e=>setForm({...form,name:e.target.value})}/></label><label>Email address<input type="email" value={form.email||''} onChange={e=>setForm({...form,email:e.target.value})}/></label><button className="account-action" onClick={()=>onChangeEmail(form.email)}>Update email address</button><p className="account-note"><ShieldCheck/>Your account owns its folders and files. Storage limits depend on the service configuration.</p><button className="sign-out-button" onClick={onSignOut}>Sign out of 8bitSpace</button><div className="danger-zone"><b>Danger zone</b><small>Permanently removes your account, folders, files, and avatars.</small><button onClick={onDeleteAccount}><Trash2/>Delete my account</button></div></div>}
       {tab === 'Photo' && <><div className="current-profile"><span className="avatar current-avatar"><ProfileAvatar src={current} /></span><div><strong>{profile.name}</strong><small>Your profile photo appears across 8bitSpace.</small></div></div>
       <div className="avatar-grid" role="list" aria-label="Profile photo choices">
         {avatarChoices.map((src, index) => <button key={src} role="listitem" className={current === src ? 'chosen' : ''} onClick={() => {onSelect(src);setForm(value=>({...value,avatarFile:null,avatarPath:null}))}} aria-label={`Choose pixel avatar ${index + 1}`}><img src={src} alt="" />{current === src && <i>✓</i>}</button>)}
       </div>
       <label className="avatar-upload"><Upload size={18} /><span><b>Upload your own</b><small>PNG, JPG or WEBP · max 5 MB</small></span><input type="file" accept="image/png,image/jpeg,image/webp" onChange={upload} /></label>
       {error && <p className="avatar-error" role="alert">{error}</p>}</>}
-      {tab === 'Preferences' && <div className="settings-page"><label className="setting-switch"><span><b>Activity notifications</b><small>Uploads, edits, and security notices</small></span><input type="checkbox" checked={form.notifications??true} onChange={e=>setForm({...form,notifications:e.target.checked})}/></label><label>Interface theme<select value={form.theme||'pixel-night'} onChange={e=>setForm({...form,theme:e.target.value})}><option value="pixel-night">Pixel night</option><option value="pixel-day">Bright sky</option></select></label></div>}
       {tab === 'Security' && <div className="settings-page security-list"><button onClick={onResetPassword}><LockKeyhole/>Send password-reset email<ChevronRight/></button><p className="security-note"><ShieldCheck/>Your files are private and protected by account-level access policies.</p></div>}
       <button className="profile-done" onClick={async()=>{await onSave({...form,avatar:current});onClose()}}>Save changes</button>
     </section>
@@ -161,7 +160,6 @@ function IntroSequence({ onFinish }) {
 
 function FileBrowser({ query, selected, setSelected, sourceFiles, active, folderStack, onOpenFolder, onNavigate, onBack, onUpload, onRequestUpload }) {
   const [view, setView] = useState('list');
-  const [checked, setChecked] = useState([]);
   const currentFolder = folderStack.at(-1) || null;
   const files = useMemo(() => sourceFiles.filter(f => {
     if (active === 'Trash' && !f.trashed) return false;
@@ -174,8 +172,7 @@ function FileBrowser({ query, selected, setSelected, sourceFiles, active, folder
   }), [query, sourceFiles, active, currentFolder]);
   const isRoot = active === 'My Cloud' && !currentFolder;
   const title = isRoot ? 'All folders' : currentFolder ? 'Folders & files' : active;
-  const toggle = (id) => setChecked(c => c.includes(id) ? c.filter(x => x !== id) : [...c, id]);
-  const openItem = file => file.type === 'folder' ? onOpenFolder(file) : setSelected(file);
+  const openItem = file => file.type === 'folder' && active === 'My Cloud' ? onOpenFolder(file) : setSelected(file);
   return <section className="section-block file-section" aria-labelledby="files-title">
     <div className="section-heading file-heading">
       <div>{currentFolder ? <div className="breadcrumbs"><button onClick={()=>onNavigate(-1)}>MY CLOUD</button>{folderStack.map((folder,index)=><React.Fragment key={folder.id}><span>/</span><button aria-current={index===folderStack.length-1?'page':undefined} onClick={()=>onNavigate(index)}>{folder.name}</button></React.Fragment>)}</div> : <span className="eyebrow">MY CLOUD / HOME</span>}<h2 id="files-title">{title} <em>{files.length}</em></h2></div>
@@ -189,13 +186,12 @@ function FileBrowser({ query, selected, setSelected, sourceFiles, active, folder
     </div>
     {files.length === 0 ? <div className="empty-state"><CloudSun /><h3>{isRoot?'Create your first folder':'This folder is empty'}</h3><p>{isRoot?'Files in 8bitSpace must always live inside a folder.':'Create a subfolder or upload files here.'}</p><button className="empty-create" onClick={onRequestUpload}><Folder/>{isRoot?'Create a folder':'Add something'}</button></div> : view === 'list' ?
       <div className="table-wrap"><table>
-        <thead><tr><th><input type="checkbox" aria-label="Select all files" checked={checked.length === files.length && files.length > 0} onChange={() => setChecked(checked.length === files.length ? [] : files.map(f => f.id))} /></th><th>Name</th><th>Status</th><th>Owner</th><th>Last modified</th><th>Size</th><th><span className="sr-only">Actions</span></th></tr></thead>
+        <thead><tr><th>Name</th><th>Status</th><th>Owner</th><th>Last modified</th><th>Size</th></tr></thead>
         <tbody>{files.map(file => <tr key={file.id} className={`${selected?.id === file.id ? 'selected' : ''}`} onClick={() => openItem(file)}>
-          <td onClick={e => e.stopPropagation()}><input type="checkbox" aria-label={`Select ${file.name}`} checked={checked.includes(file.id)} onChange={() => toggle(file.id)} /></td>
           <td><span className={`row-icon ${file.color}`}><IconFor type={file.type} /></span><span className="file-name"><strong>{file.name}</strong><small><i className={`tag-dot ${file.color}`} />{file.tag}</small></span></td>
           <td><span className={`status ${file.status.toLowerCase().replace(' ', '-')}`}>{file.status === 'Syncing' && <i />}{file.status}</span></td>
           <td><span className="owner"><i>{file.owner === 'You' ? 'DT' : file.owner.split(' ').map(x => x[0]).join('')}</i>{file.owner}</span></td>
-          <td>{file.modified}</td><td>{file.size}</td><td><button className="row-action" aria-label={`Actions for ${file.name}`}><MoreHorizontal /></button></td>
+          <td>{file.modified}</td><td>{file.size}</td>
         </tr>)}</tbody>
       </table></div> :
       <div className="file-grid">{files.map(file => <button key={file.id} className={`grid-file ${selected?.id === file.id ? 'selected' : ''}`} onClick={() => openItem(file)}>
@@ -219,20 +215,18 @@ function CreateDialog({ onClose, onCreateFolder, onUpload, folders, currentFolde
 
 function SpecialView({ active, activity, storage }) {
   if(active==='Activity') return <section className="special-view"><span className="eyebrow">LIVE HISTORY</span><h2>Activity</h2>{activity.map(item=><article key={item.id}><Activity/><div><b>{item.action}</b><p>{item.detail}</p></div><time>{new Date(item.time).toLocaleString()}</time></article>)}</section>;
-  if(active==='Storage') return <section className="special-view storage-view"><span className="eyebrow">SPACE CHECK</span><h2>Storage</h2><div className="storage-hero"><HardDrive/><strong>{((storage.used||0)/1024**3).toFixed(2)} GB</strong><span>used of 100 GB</span></div><div className="storage-stats"><div><b>{storage.files||0}</b><span>Active files</span></div><div><b>{storage.trash||0}</b><span>In trash</span></div><div><b>{Math.max(0,100-(storage.used||0)/1024**3).toFixed(1)} GB</b><span>Available</span></div></div></section>;
-  if(active==='File Requests') return <section className="special-view empty-feature"><FolderInput/><h2>File Requests</h2><p>Collect files from anyone without exposing your cloud contents.</p><button>Create request link</button></section>;
-  if(active==='Secure Vault') return <section className="special-view empty-feature"><LockKeyhole/><h2>Secure Vault</h2><p>Add an extra verification step for your most sensitive files.</p><button>Unlock vault</button></section>;
+  if(active==='Storage') return <section className="special-view storage-view"><span className="eyebrow">CURRENT ACCOUNT USAGE</span><h2>Storage</h2><div className="storage-hero"><HardDrive/><strong>{storageLabel(storage.used)}</strong><span>stored, including files in Trash</span></div><div className="storage-stats"><div><b>{storage.files||0}</b><span>Active files</span></div><div><b>{storage.folders||0}</b><span>Active folders</span></div><div><b>{storage.trash||0}</b><span>Items in trash</span></div></div><p className="storage-disclaimer">8bitSpace reports the size recorded for your uploaded files. It does not advertise a fixed per-user quota.</p></section>;
   return null;
 }
 
-function DetailsPanel({ file, onClose, onAction }) {
+function DetailsPanel({ file, onClose, onAction, sourceFiles }) {
   if (!file) return null;
   return <aside className="details-panel" aria-label={`${file.name} details`}>
     <div className="details-head"><span>FILE DETAILS</span><button className="icon-button" onClick={onClose} aria-label="Close details"><X /></button></div>
     <div className={`preview-box ${file.color}`}><IconFor type={file.type} size={54} /><span>8BIT</span></div>
     <h3>{file.name}</h3><p className="muted">{file.type.toUpperCase()} · {file.size}</p>
     <div className="detail-actions">{!file.trashed&&<><button onClick={()=>onAction('share',file)}><Share2 />Share</button><button onClick={()=>onAction('download',file)}><Download />Download</button><button onClick={()=>onAction('star',file)}><Star fill={file.starred?'currentColor':'none'}/>{file.starred?'Unstar':'Star'}</button></>}<button onClick={()=>onAction(file.trashed?'restore':'trash',file)}>{file.trashed?<Archive/>:<Trash2/>}{file.trashed?'Restore':'Trash'}</button>{file.trashed&&<button className="permanent-delete" onClick={()=>onAction('delete',file)}><Trash2/>Delete forever</button>}</div>
-    <dl><div><dt>Owner</dt><dd>{file.owner}</dd></div><div><dt>Modified</dt><dd>{file.modified}</dd></div><div><dt>Status</dt><dd>{file.status}</dd></div><div><dt>Folder</dt><dd>Current folder</dd></div></dl>
+    <dl><div><dt>Owner</dt><dd>{file.owner}</dd></div><div><dt>Modified</dt><dd>{file.modified}</dd></div><div><dt>Status</dt><dd>{file.status}</dd></div><div><dt>Location</dt><dd>{file.type==='folder'?(sourceFiles.find(item=>item.id===file.parentId)?.name||'My Cloud'):(sourceFiles.find(item=>item.id===file.folderId)?.name||'Folder')}</dd></div></dl>
   </aside>;
 }
 
@@ -253,6 +247,13 @@ function AuthScreen() {
     else if (mode === 'sign-up' && !data.session) setMessage('Check your email to confirm your 8bitSpace account.');
     setPending(false);
   };
+  const sendReset = async () => {
+    if (!email.trim()) { setMessage('Enter your email address first.'); return; }
+    setPending(true); setMessage('');
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${location.origin}/?recovery=1` });
+    setMessage(error ? error.message : 'Check your email for a secure password-reset link.');
+    setPending(false);
+  };
   return <div className="auth-shell">
     <PixelLandscape /><div className="atmosphere" />
     <main className="auth-card">
@@ -264,6 +265,7 @@ function AuthScreen() {
         {message && <p className="auth-message" role="status">{message}</p>}
         <button disabled={pending}>{pending ? 'Connecting…' : mode === 'sign-in' ? 'Enter 8bitSpace' : 'Create account'}</button>
       </form>
+      {mode==='sign-in'&&<button className="forgot-password" disabled={pending} onClick={sendReset}>FORGOT PASSWORD?</button>}
       <button className="auth-switch" onClick={()=>{setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in');setMessage('')}}>{mode === 'sign-in' ? 'NEW HERE? CREATE AN ACCOUNT →' : 'ALREADY A PLAYER? SIGN IN →'}</button>
     </main>
   </div>;
@@ -299,7 +301,7 @@ function App() {
   const [folderStack, setFolderStack] = useState([]);
   const [profile, setProfile] = useState({name:'Player',email:'',avatar:avatarChoices[0],notifications:true,theme:'pixel-night'});
   const [activity, setActivity] = useState([]);
-  const [storage, setStorage] = useState({used:0,total:100*1024**3,files:0,trash:0});
+  const [storage, setStorage] = useState({used:0,files:0,folders:0,trash:0});
   const [createOpen, setCreateOpen] = useState(false);
   const [toast, setToast] = useState('');
   const [uploadProgress,setUploadProgress]=useState(null);
@@ -341,10 +343,10 @@ function App() {
       <Header query={query} setQuery={setQuery} onMenu={() => setNavOpen(true)} avatar={avatar} name={profile.name} onProfile={() => setProfileOpen(true)} />
       <div className="content-scroll">
         {special ? <SpecialView active={active} activity={activity} storage={storage}/> : <FileBrowser query={query} selected={selected} setSelected={setSelected} sourceFiles={files} active={active} folderStack={folderStack} onOpenFolder={folder=>{setFolderStack(stack=>[...stack,folder]);setSelected(null)}} onNavigate={index=>{setFolderStack(stack=>index<0?[]:stack.slice(0,index+1));setSelected(null)}} onBack={()=>{setFolderStack(stack=>stack.slice(0,-1));setSelected(null)}} onUpload={uploadFiles} onRequestUpload={()=>setCreateOpen(true)}/>}
-        <footer><span><ShieldCheck size={14}/> Protected & synced</span><span>8bitSpace · peaceful files, serious storage</span></footer>
+        <footer><span><ShieldCheck size={14}/> Private to your signed-in account</span><span>8bitSpace · folder-first cloud storage</span></footer>
       </div>
     </main>
-    <DetailsPanel file={selected} onClose={() => setSelected(null)} onAction={fileAction} />
+    <DetailsPanel file={selected} sourceFiles={files} onClose={() => setSelected(null)} onAction={fileAction} />
     {profileOpen && <AvatarPicker current={avatar} onSelect={setAvatar} onClose={() => setProfileOpen(false)} profile={profile} onSave={saveProfile} onSignOut={async()=>{setProfileOpen(false);await supabase.auth.signOut()}} onResetPassword={async()=>{const {error}=await supabase.auth.resetPasswordForEmail(profile.email,{redirectTo:`${location.origin}/?recovery=1`});notify(error?error.message:'Password-reset email sent')}} onChangeEmail={changeEmail} onDeleteAccount={()=>setConfirmation({kind:'account'})} />}
     {createOpen && <CreateDialog onClose={()=>setCreateOpen(false)} onCreateFolder={createFolder} onUpload={uploadFiles} folders={rootFolders} currentFolder={folderStack.at(-1)||null}/>}
     {confirmation&&<ConfirmDialog title={confirmation.kind==='account'?'Delete your account?':`Delete ${confirmation.item.name}?`} message={confirmation.kind==='account'?'This permanently deletes your profile, every folder, every file, and all stored avatars. This cannot be undone.':'The item and its stored data will be removed forever. This cannot be undone.'} phrase={confirmation.kind==='account'?'DELETE ACCOUNT':'DELETE'} confirmLabel={confirmation.kind==='account'?'Delete account':'Delete forever'} onCancel={()=>setConfirmation(null)} onConfirm={runConfirmation}/>}
