@@ -2,7 +2,8 @@
 
 :root { --ink:#17202a; --muted:#687583; --border:#d8e2ea; --sky:#6fc7ff; --cloud:#ddf3ff; --green:#78d58a; --red:#ff6b78; --yellow:#ffd76a; --panel:rgba(255,255,255,.94); --pixel:'Pixelify Sans',monospace; --body:'DM Sans',sans-serif; color:var(--ink); font-family:var(--body); font-synthesis:none; }
 * { box-sizing:border-box; }
-body { margin:0; min-width:320px; min-height:100vh; overflow:hidden; background:#b9e8ff; }
+html { background:#143248; }
+body { margin:0; min-width:320px; min-height:100vh; overflow:hidden; background:transparent; }
 button,input { font:inherit; }
 button { color:inherit; }
 button:focus-visible,input:focus-visible { outline:3px solid #111820; outline-offset:2px; }
