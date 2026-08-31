@@ -89,7 +89,10 @@ export async function createCloudFolder(user, name, parentId = null) {
   await logActivity(user, 'Folder created', name.trim())
 }
 
-const safeObjectName = name => name.normalize('NFKC').replace(/[\\/\0]/g, '-').slice(0, 180)
+const safeExtension = name => {
+  const match = name.normalize('NFKC').toLowerCase().match(/\.([a-z0-9]{1,10})$/)
+  return match ? `.${match[1]}` : ''
+}
 
 const resumableUpload = async (file, path, onProgress) => {
   const { data: { session } } = await supabase.auth.getSession()
@@ -118,7 +121,9 @@ export async function uploadCloudFiles(user, folderId, files, onProgress = () =>
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0)
   let completedBytes = 0
   for (const file of files) {
-    const path = `${user.id}/${folderId}/${crypto.randomUUID()}-${safeObjectName(file.name)}`
+    // Keep user-controlled names out of Storage URLs. The original name remains
+    // in the database and is restored as the download filename.
+    const path = `${user.id}/${folderId}/${crypto.randomUUID()}${safeExtension(file.name)}`
     const report = (uploaded) => onProgress({ name: file.name, uploaded: completedBytes + uploaded, total: totalBytes, percent: totalBytes ? Math.round((completedBytes + uploaded) / totalBytes * 100) : 100 })
     if (file.size > 6 * 1024 * 1024) await resumableUpload(file, path, report)
     else {
