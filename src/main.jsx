@@ -7,6 +7,7 @@ import {
   ShieldCheck, Star, Trash2, Upload, Video, X
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
+import { startSocialSignIn, authCallbackState, clearAuthCallback } from './lib/auth';
 import {
   createCloudFolder, deleteCloudAccount, loadCloud, permanentlyDeleteCloudItem, saveCloudProfile, setCloudStar,
   setCloudTrash, signedFileUrl, uploadCloudFiles,
@@ -158,7 +159,7 @@ function IntroSequence({ onFinish }) {
   </div>;
 }
 
-function FileBrowser({ query, selected, setSelected, sourceFiles, active, folderStack, onOpenFolder, onNavigate, onBack, onUpload, onRequestUpload }) {
+function FileBrowser({ query, selected, setSelected, sourceFiles, active, folderStack, onOpenFolder, onNavigate, onBack: _onBack, onUpload, onRequestUpload }) {
   const [view, setView] = useState('list');
   const currentFolder = folderStack.at(-1) || null;
   const files = useMemo(() => sourceFiles.filter(f => {
@@ -230,12 +231,20 @@ function DetailsPanel({ file, onClose, onAction, sourceFiles }) {
   </aside>;
 }
 
-function AuthScreen() {
+function AuthScreen({ initialMessage = '' }) {
   const [mode, setMode] = useState('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState(initialMessage);
+  const [socialProvider, setSocialProvider] = useState(null);
+  useEffect(() => { setMessage(initialMessage); }, [initialMessage]);
+  const socialSignIn = async provider => {
+    if (pending) return;
+    setPending(true); setSocialProvider(provider); setMessage('');
+    try { await startSocialSignIn(provider); }
+    catch (error) { setMessage(error.name === 'TimeoutError' ? 'Sign-in took too long. Please try again.' : error.message || 'Could not connect. Please try again.'); setPending(false); setSocialProvider(null); }
+  };
   const submit = async event => {
     event.preventDefault();
     setPending(true); setMessage('');
@@ -259,14 +268,19 @@ function AuthScreen() {
     <main className="auth-card">
       <div className="auth-brand"><Cloud fill="currentColor"/><div><strong>8bitSpace</strong><span>YOUR PRIVATE PIXEL CLOUD</span></div></div>
       <div className="auth-copy"><span>{mode === 'sign-in' ? 'PLAYER RETURNING' : 'NEW PLAYER'}</span><h1>{mode === 'sign-in' ? 'Welcome back.' : 'Claim your space.'}</h1><p>Every file belongs in a folder. Every folder belongs only to you.</p></div>
+      <div className="social-sign-in" aria-label="Other ways to sign in">
+        <button type="button" disabled={pending} onClick={()=>socialSignIn('google')}><span className="provider-mark" aria-hidden="true">G</span>{socialProvider==='google'?'Connecting to Google…':'Continue with Google'}</button>
+        <button type="button" disabled={pending} onClick={()=>socialSignIn('github')}><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .75a11.25 11.25 0 0 0-3.558 21.923c.563.104.769-.244.769-.542 0-.267-.01-.975-.016-1.913-3.13.68-3.791-1.508-3.791-1.508-.512-1.3-1.25-1.647-1.25-1.647-1.023-.7.078-.686.078-.686 1.132.08 1.728 1.162 1.728 1.162 1.006 1.724 2.64 1.226 3.283.938.102-.729.394-1.226.716-1.508-2.499-.284-5.126-1.25-5.126-5.566 0-1.23.44-2.235 1.16-3.023-.117-.284-.503-1.429.11-2.978 0 0 .945-.303 3.094 1.155A10.79 10.79 0 0 1 12 6.178c.956.005 1.919.13 2.818.379 2.147-1.458 3.09-1.155 3.09-1.155.615 1.55.229 2.694.113 2.978.722.788 1.158 1.793 1.158 3.023 0 4.327-2.631 5.279-5.138 5.558.405.35.766 1.043.766 2.1 0 1.516-.014 2.738-.014 3.11 0 .3.203.65.774.54A11.25 11.25 0 0 0 12 .75Z"/></svg>{socialProvider==='github'?'Connecting to GitHub…':'Continue with GitHub'}</button>
+      </div>
+      <div className="auth-divider"><span>or use email</span></div>
       <form className="auth-form" onSubmit={submit}>
         <label>Email address<input type="email" autoComplete="email" required value={email} onChange={event=>setEmail(event.target.value)} placeholder="you@example.com"/></label>
-        <label>Password<input type="password" autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'} minLength={6} required value={password} onChange={event=>setPassword(event.target.value)} placeholder="At least 6 characters"/></label>
+        <label>Password<input type="password" autoComplete={mode === 'sign-in' ? 'current-password' : 'new-password'} minLength={mode === 'sign-up' ? 12 : 1} required value={password} onChange={event=>setPassword(event.target.value)} placeholder={mode === 'sign-up' ? "At least 12 characters" : "Your password"}/></label>
         {message && <p className="auth-message" role="status">{message}</p>}
-        <button disabled={pending}>{pending ? 'Connecting…' : mode === 'sign-in' ? 'Enter 8bitSpace' : 'Create account'}</button>
+        <button disabled={pending}>{pending && !socialProvider ? 'Connecting…' : mode === 'sign-in' ? 'Enter 8bitSpace' : 'Create account'}</button>
       </form>
       {mode==='sign-in'&&<button className="forgot-password" disabled={pending} onClick={sendReset}>FORGOT PASSWORD?</button>}
-      <button className="auth-switch" onClick={()=>{setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in');setMessage('')}}>{mode === 'sign-in' ? 'NEW HERE? CREATE AN ACCOUNT →' : 'ALREADY A PLAYER? SIGN IN →'}</button>
+      <button className="auth-switch" disabled={pending} onClick={()=>{setMode(mode === 'sign-in' ? 'sign-up' : 'sign-in');setMessage('')}}>{mode === 'sign-in' ? 'NEW HERE? CREATE AN ACCOUNT →' : 'ALREADY A PLAYER? SIGN IN →'}</button>
     </main>
   </div>;
 }
@@ -277,17 +291,20 @@ function RecoveryScreen({ onDone }) {
   const [message,setMessage]=useState('');
   const [pending,setPending]=useState(false);
   const submit=async(event)=>{event.preventDefault();if(password!==confirm){setMessage('Passwords do not match.');return}setPending(true);const {error}=await supabase.auth.updateUser({password});if(error){setMessage(error.message);setPending(false);return}await supabase.auth.signOut();setPending(false);onDone()};
-  return <div className="auth-shell"><PixelLandscape/><div className="atmosphere"/><main className="auth-card"><div className="auth-brand"><LockKeyhole/><div><strong>8bitSpace</strong><span>SECURE RECOVERY</span></div></div><div className="auth-copy"><span>NEW ACCESS KEY</span><h1>Set a new password.</h1><p>Choose at least 8 characters, then sign in again.</p></div><form className="auth-form" onSubmit={submit}><label>New password<input type="password" minLength={8} required autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)}/></label><label>Confirm password<input type="password" minLength={8} required autoComplete="new-password" value={confirm} onChange={e=>setConfirm(e.target.value)}/></label>{message&&<p className="auth-message" role="alert">{message}</p>}<button disabled={pending}>{pending?'Saving…':'Set new password'}</button></form></main></div>;
+  return <div className="auth-shell"><PixelLandscape/><div className="atmosphere"/><main className="auth-card"><div className="auth-brand"><LockKeyhole/><div><strong>8bitSpace</strong><span>SECURE RECOVERY</span></div></div><div className="auth-copy"><span>NEW ACCESS KEY</span><h1>Set a new password.</h1><p>Choose at least 12 characters, then sign in again.</p></div><form className="auth-form" onSubmit={submit}><label>New password<input type="password" minLength={12} required autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)}/></label><label>Confirm password<input type="password" minLength={12} required autoComplete="new-password" value={confirm} onChange={e=>setConfirm(e.target.value)}/></label>{message&&<p className="auth-message" role="alert">{message}</p>}<button disabled={pending}>{pending?'Saving…':'Set new password'}</button></form></main></div>;
 }
 
-function ConfirmDialog({ title, message, phrase, confirmLabel, onCancel, onConfirm }) {
+function ConfirmDialog({ title, message, phrase, confirmLabel, onCancel, onConfirm, requirePassword, onSetPassword }) {
   const [value,setValue]=useState('');
+  const [password,setPassword]=useState('');
   const [pending,setPending]=useState(false);
-  return <div className="profile-modal-layer"><section className="confirm-dialog" role="alertdialog" aria-modal="true"><div className="profile-modal-head"><div><span>PERMANENT ACTION</span><h2>{title}</h2></div><button className="icon-button" onClick={onCancel}><X/></button></div><p>{message}</p><label>Type <b>{phrase}</b> to continue<input autoFocus value={value} onChange={e=>setValue(e.target.value)}/></label><div className="confirm-actions"><button onClick={onCancel}>Cancel</button><button className="danger-confirm" disabled={value!==phrase||pending} onClick={async()=>{setPending(true);await onConfirm();setPending(false)}}>{pending?'Working…':confirmLabel}</button></div></section></div>
+  return <div className="profile-modal-layer"><section className="confirm-dialog" role="alertdialog" aria-modal="true"><div className="profile-modal-head"><div><span>PERMANENT ACTION</span><h2>{title}</h2></div><button className="icon-button" onClick={onCancel}><X/></button></div><p>{message}</p><label>Type <b>{phrase}</b> to continue<input autoFocus value={value} onChange={e=>setValue(e.target.value)}/></label>{requirePassword && <label>Current password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label>}{requirePassword && <div className="password-help"><p>Enter your 8bitSpace password, never your Google or GitHub password.</p><button type="button" disabled={pending} onClick={onSetPassword}>Email me a password setup/reset link</button></div>}<div className="confirm-actions"><button onClick={onCancel}>Cancel</button><button className="danger-confirm" disabled={value!==phrase||pending||(requirePassword&&!password)} onClick={async()=>{setPending(true);await onConfirm(password);setPending(false)}}>{pending?'Working…':confirmLabel}</button></div></section></div>
 }
 
 function App() {
   const [user, setUser] = useState(null);
+  const currentUserId = useRef(null);
+  const [authNotice,setAuthNotice] = useState(() => authCallbackState(location.href).message);
   const [authLoading, setAuthLoading] = useState(true);
   const [recoveryMode,setRecoveryMode]=useState(location.search.includes('recovery=1')||location.hash.includes('type=recovery'));
   const [active, setActive] = useState('My Cloud');
@@ -309,22 +326,33 @@ function App() {
   const special = ['Activity','Storage'].includes(active);
   const refresh = async () => {
     if (!user) return;
-    try { const data=await loadCloud(user); setFiles(data.files);setProfile(data.profile);setAvatar(data.profile.avatar||avatarChoices[0]);setActivity(data.activity);setStorage(data.storage); }
+    try { const data=await loadCloud(user); if(currentUserId.current!==user.id)return; setFiles(data.files);setProfile(data.profile);setAvatar(data.profile.avatar||avatarChoices[0]);setActivity(data.activity);setStorage(data.storage); }
     catch (error) { setToast(error.message || 'Could not load your cloud.'); }
   };
   useEffect(()=>{
-    supabase.auth.getSession().then(({data})=>{setUser(data.session?.user||null);setAuthLoading(false)});
-    const {data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{if(event==='PASSWORD_RECOVERY')setRecoveryMode(true);setUser(session?.user||null);setAuthLoading(false)});
-    return ()=>subscription.unsubscribe();
+    if (!supabase) { setAuthLoading(false); return; }
+    let activeEffect = true;
+    const callback = authCallbackState(location.href);
+    supabase.auth.getSession().then(({data,error})=>{
+      if (!activeEffect) return;
+      currentUserId.current=data.session?.user?.id||null;setUser(data.session?.user||null);
+      if (callback.isCallback) {
+        setAuthNotice(callback.message || (error || !data.session ? 'Sign-in could not be completed. Please start again in this browser.' : ''));
+        history.replaceState({},'',clearAuthCallback(location.href));
+      }
+      setAuthLoading(false);
+    }).catch(()=>{if(activeEffect){setAuthNotice('Could not restore your session. Please sign in again.');setAuthLoading(false);}});
+    const {data:{subscription}}=supabase.auth.onAuthStateChange((event,session)=>{if(event==='PASSWORD_RECOVERY')setRecoveryMode(true);currentUserId.current=session?.user?.id||null;setUser(session?.user||null);setAuthLoading(false)});
+    return ()=>{activeEffect=false;subscription.unsubscribe();};
   },[]);
-  useEffect(()=>{if(user)refresh();else{setFiles([]);setActivity([])}},[user]);
+  useEffect(()=>{if(user)refresh();else{setFiles([]);setActivity([]);setSelected(null);setFolderStack([]);setProfileOpen(false);setAvatar(avatarChoices[0]);setProfile({name:'Player',email:'',avatar:avatarChoices[0]});setStorage({used:0,files:0,folders:0,trash:0})}},[user]);
   const notify=(message)=>{setToast(message);window.setTimeout(()=>setToast(''),2600)};
   const uploadFiles=async(e,folderId)=>{const chosen=[...(e.target.files||[])];if(!chosen.length)return;if(!folderId){notify('You must create or open a folder first.');setCreateOpen(true);e.target.value='';return}try{setUploadProgress({name:chosen[0].name,percent:0});await uploadCloudFiles(user,folderId,chosen,setUploadProgress);await refresh();notify(`${chosen.length} file${chosen.length===1?'':'s'} uploaded`);setCreateOpen(false);const folder=files.find(f=>f.id===folderId);if(folder&&!folderStack.some(item=>item.id===folder.id))setFolderStack([folder])}catch(err){notify(err.message)}finally{setUploadProgress(null)}e.target.value=''};
   const createFolder=async(name,parentId=null)=>{try{await createCloudFolder(user,name,parentId);await refresh();notify(parentId?'Subfolder created':'Folder created');setCreateOpen(false)}catch(err){notify(err.message)}};
   const saveProfile=async(next)=>{try{const saved=await saveCloudProfile(user,next);setProfile(saved);setAvatar(saved.avatar);notify('Profile saved')}catch(err){notify(err.message)}};
   const fileAction=async(action,file)=>{try{if(action==='delete'){setConfirmation({kind:'item',item:file});return}if(action==='share'){const url=await signedFileUrl(file,3600);await navigator.clipboard.writeText(url);notify('Private link copied · expires in 1 hour');return}if(action==='download'){const url=await signedFileUrl(file,300,true);window.open(url,'_blank','noopener,noreferrer');return}if(action==='star'){await setCloudStar(file,!file.starred);await refresh();notify(file.starred?'Removed from starred':'Added to starred');return}await setCloudTrash(user,file,action==='trash');setSelected(null);await refresh();notify(action==='trash'?'Moved to trash':'Item restored')}catch(err){notify(err.message)}};
   const changeEmail=async(email)=>{if(email===profile.email){notify('That is already your email address.');return}const {error}=await supabase.auth.updateUser({email:email.trim()});notify(error?error.message:'Confirmation links sent. Your email changes after verification.')};
-  const runConfirmation=async()=>{try{if(confirmation.kind==='account'){await deleteCloudAccount();await supabase.auth.signOut();setProfileOpen(false)}else{await permanentlyDeleteCloudItem(user,confirmation.item);setSelected(null);await refresh();notify('Permanently deleted')}setConfirmation(null)}catch(error){notify(error.message||'The action could not be completed.');setConfirmation(null)}};
+  const runConfirmation=async(password)=>{try{if(confirmation.kind==='account'){await deleteCloudAccount(password);await supabase.auth.signOut();setProfileOpen(false)}else{await permanentlyDeleteCloudItem(user,confirmation.item);setSelected(null);await refresh();notify('Permanently deleted')}setConfirmation(null)}catch(error){notify(error.message||'The action could not be completed.');setConfirmation(null)}};
   useEffect(() => {
     const onKey = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); document.querySelector('.search-box input')?.focus(); } if (e.key === 'Escape') { setSelected(null); setNavOpen(false); } };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
@@ -333,7 +361,9 @@ function App() {
   const rootFolders=files.filter(f=>f.type==='folder'&&!f.trashed&&!f.parentId);
   if (authLoading) return <div className="auth-shell"><PixelLandscape/><div className="atmosphere"/><div className="auth-loading"><Cloud/>CONNECTING TO YOUR CLOUD…</div></div>;
   if (recoveryMode) return <RecoveryScreen onDone={()=>{history.replaceState({},'',location.pathname);setRecoveryMode(false)}}/>;
-  if (!user) return <AuthScreen/>;
+  if (!supabase) return <main className="auth-shell"><section className="auth-card"><h1>8bitSpace is not configured.</h1><p>The site owner needs to configure the Supabase project URL and publishable key.</p></section></main>;
+  if (recoveryMode) return <RecoveryScreen onDone={()=>{history.replaceState({},'',location.pathname);setRecoveryMode(false)}}/>;
+  if (!user) return <AuthScreen initialMessage={authNotice}/>;
   return <div className="app-shell">
     <PixelLandscape /><div className="atmosphere" />
     {navOpen && <button className="scrim" onClick={() => setNavOpen(false)} aria-label="Close navigation" />}
@@ -347,9 +377,9 @@ function App() {
       </div>
     </main>
     <DetailsPanel file={selected} sourceFiles={files} onClose={() => setSelected(null)} onAction={fileAction} />
-    {profileOpen && <AvatarPicker current={avatar} onSelect={setAvatar} onClose={() => setProfileOpen(false)} profile={profile} onSave={saveProfile} onSignOut={async()=>{setProfileOpen(false);await supabase.auth.signOut()}} onResetPassword={async()=>{const {error}=await supabase.auth.resetPasswordForEmail(profile.email,{redirectTo:`${location.origin}/?recovery=1`});notify(error?error.message:'Password-reset email sent')}} onChangeEmail={changeEmail} onDeleteAccount={()=>setConfirmation({kind:'account'})} />}
+    {profileOpen && <AvatarPicker current={avatar} onSelect={setAvatar} onClose={() => setProfileOpen(false)} profile={profile} onSave={saveProfile} onSignOut={async()=>{setProfileOpen(false);await supabase.auth.signOut()}} onResetPassword={async()=>{const {error}=await supabase.auth.resetPasswordForEmail(profile.email,{redirectTo:`${location.origin}/?recovery=1`});notify(error?error.message:'Password-reset email sent')}} onChangeEmail={changeEmail} onDeleteAccount={()=>{setProfileOpen(false);setConfirmation({kind:'account'})}} />}
     {createOpen && <CreateDialog onClose={()=>setCreateOpen(false)} onCreateFolder={createFolder} onUpload={uploadFiles} folders={rootFolders} currentFolder={folderStack.at(-1)||null}/>}
-    {confirmation&&<ConfirmDialog title={confirmation.kind==='account'?'Delete your account?':`Delete ${confirmation.item.name}?`} message={confirmation.kind==='account'?'This permanently deletes your profile, every folder, every file, and all stored avatars. This cannot be undone.':'The item and its stored data will be removed forever. This cannot be undone.'} phrase={confirmation.kind==='account'?'DELETE ACCOUNT':'DELETE'} confirmLabel={confirmation.kind==='account'?'Delete account':'Delete forever'} onCancel={()=>setConfirmation(null)} onConfirm={runConfirmation}/>}
+    {confirmation&&<ConfirmDialog onSetPassword={async()=>{const {error}=await supabase.auth.resetPasswordForEmail(user.email,{redirectTo:`${location.origin}/?recovery=1`});notify(error?'Could not send the password email. Please try again.':'Check your email to set or reset your 8bitSpace password.')}} requirePassword={confirmation.kind==='account'} title={confirmation.kind==='account'?'Delete your account?':`Delete ${confirmation.item.name}?`} message={confirmation.kind==='account'?'This permanently deletes your profile, every folder, every file, and all stored avatars. This cannot be undone.':'The item and its stored data will be removed forever. This cannot be undone.'} phrase={confirmation.kind==='account'?'DELETE ACCOUNT':'DELETE'} confirmLabel={confirmation.kind==='account'?'Delete account':'Delete forever'} onCancel={()=>setConfirmation(null)} onConfirm={runConfirmation}/>}
     {uploadProgress&&<div className="upload-progress" role="status"><div><span>UPLOADING</span><b>{uploadProgress.name}</b></div><strong>{uploadProgress.percent}%</strong><div className="progress-track"><i style={{width:`${uploadProgress.percent}%`}}/></div></div>}
     {toast && <div className="toast" role="status"><Cloud size={16}/>{toast}</div>}
     <button className="floating-create" aria-label="Create new" onClick={()=>setCreateOpen(true)}><Plus /></button>
