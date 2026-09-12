@@ -310,3 +310,18 @@ html{overflow-x:hidden}
 .table-wrap td:first-child{display:flex;align-items:center;gap:10px;color:#fff}.table-wrap td:nth-child(2){display:table-cell;color:rgba(255,255,255,.88)}
 .account-note{display:flex;align-items:flex-start;gap:10px;margin:0;padding:14px;border:1px solid rgba(255,255,255,.24);border-radius:11px;color:#c8dce5;font-size:12px;line-height:1.55}.account-note svg{flex:0 0 auto}.storage-disclaimer{max-width:620px;margin:18px auto 0;text-align:center;color:rgba(255,255,255,.78);font-size:12px;line-height:1.55}.forgot-password{margin-top:16px;border:0;color:#d9edf5;background:transparent;font:600 9px var(--pixel);letter-spacing:.07em;cursor:pointer;text-decoration:underline;text-underline-offset:4px}.forgot-password:disabled{opacity:.5;cursor:wait}
 @media(max-width:620px){.table-wrap tr{grid-template-columns:minmax(0,1fr) auto}.table-wrap td{display:none!important}.table-wrap td:first-child,.table-wrap td:nth-child(2){display:flex!important;align-items:center}.table-wrap td:first-child{grid-column:1;min-width:0}.table-wrap td:nth-child(2){grid-column:2}.storage-disclaimer{font-size:11px}}
+
+/* OAuth sign-in uses hosted redirects, without loading third-party scripts. */
+.social-sign-in{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:24px}
+.social-sign-in button{display:flex;align-items:center;justify-content:center;gap:9px;min-height:48px;padding:10px 12px;border:1px solid #b3cddd;border-radius:11px;background:#fff;color:#173143;font:600 13px var(--body);cursor:pointer}
+.social-sign-in button:hover{background:#e8f6ff;border-color:#7dd8ff}
+.social-sign-in button:focus-visible{outline:3px solid #7dd8ff;outline-offset:3px}
+.social-sign-in button:disabled{opacity:.65;cursor:wait}
+.social-sign-in svg,.provider-mark{width:19px;height:19px;flex-shrink:0}
+.provider-mark{font:700 20px Arial,sans-serif;line-height:19px}
+.auth-divider{display:flex;align-items:center;gap:12px;margin-top:24px;color:#bed2dc;font-size:12px}
+.auth-divider:before,.auth-divider:after{content:'';height:1px;flex:1;background:rgba(255,255,255,.25)}
+.password-help{margin-top:12px;font-size:12px;line-height:1.5;color:#c7d8e0}
+.password-help button{background:transparent;border:0;padding:4px 0;color:#9bddff;text-decoration:underline;cursor:pointer;text-align:left}
+.confirm-dialog{max-height:calc(100dvh - 40px);overflow:auto}
+@media(max-width:520px){.social-sign-in{grid-template-columns:1fr}.auth-card{margin-block:20px}.auth-shell{overflow:auto}.social-sign-in button{min-height:48px}}

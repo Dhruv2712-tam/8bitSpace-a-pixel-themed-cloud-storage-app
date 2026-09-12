@@ -5,3 +5,9 @@ dist/
 !.env.example
 server/uploads/
 .vite-preview*.log
+
+supabase/.temp/
+*.pem
+*.key
+coverage/
+.browser-check/

@@ -5,6 +5,7 @@ A pixel-themed, folder-first cloud storage application built with React, Vite an
 ## Features
 
 - Supabase email/password authentication
+- Google and GitHub sign-in through Supabase Auth (provider activation required before production use)
 - Private user-owned folders and files
 - Folder-first uploads enforced by the database
 - Private Supabase Storage with expiring signed links
@@ -20,3 +21,7 @@ A pixel-themed, folder-first cloud storage application built with React, Vite an
 
 The database and Storage setup is documented in `supabase/8bitspace-setup.sql`.
 
+
+## Security and automated checks
+
+See [SECURITY.md](SECURITY.md) for the implemented safeguards, tests, deployment order, and hosted settings still requiring activation. Run `npm test` and `npm run test:browser` for automated verification.

@@ -1,5 +1,6 @@
 import * as tus from 'tus-js-client'
 import { supabase, supabasePublishableKey, supabaseUrl } from './supabase'
+import { cleanName, requireId, safeExtension, validateUpload, validateAvatar, safeAvatar } from './security'
 
 const typeFromMime = (mime = '', name = '') => {
   if (mime.startsWith('image/')) return 'image'
@@ -62,7 +63,7 @@ export async function loadCloud(user) {
     profileRow = must(await supabase.from('profiles').insert({ id: user.id, display_name: user.email?.split('@')[0] || 'Player' }).select().single())
   }
   const used = files.reduce((total, file) => total + file.bytes, 0)
-  let avatar = profileRow.avatar_url || '/avatars/avatar-01.jpeg'
+  let avatar = safeAvatar(profileRow.avatar_url, user.id)
   const avatarPath = avatar.startsWith('storage:') ? avatar.slice(8) : null
   if (avatarPath) {
     const { data } = await supabase.storage.from('profile-avatars').createSignedUrl(avatarPath, 3600)
@@ -85,13 +86,11 @@ export async function loadCloud(user) {
 }
 
 export async function createCloudFolder(user, name, parentId = null) {
+  name = cleanName(name, 120)
+  requireId(user.id)
+  if (parentId) requireId(parentId)
   must(await supabase.from('folders').insert({ user_id: user.id, parent_id: parentId, name: name.trim() }))
   await logActivity(user, 'Folder created', name.trim())
-}
-
-const safeExtension = name => {
-  const match = name.normalize('NFKC').toLowerCase().match(/\.([a-z0-9]{1,10})$/)
-  return match ? `.${match[1]}` : ''
 }
 
 const resumableUpload = async (file, path, onProgress) => {
@@ -106,6 +105,8 @@ const resumableUpload = async (file, path, onProgress) => {
       retryDelays: [0, 1000, 3000, 5000, 10000],
       metadata: { bucketName: 'space-files', objectName: path, contentType: file.type || 'application/octet-stream', cacheControl: '3600' },
       removeFingerprintOnSuccess: true,
+      // Never resume another account's or another destination's upload.
+      fingerprint: async () => `8bitspace:${path}:${file.size}:${file.lastModified}`,
       onError: reject,
       onProgress: (uploaded, total) => onProgress(uploaded, total),
       onSuccess: resolve,
@@ -118,6 +119,10 @@ const resumableUpload = async (file, path, onProgress) => {
 }
 
 export async function uploadCloudFiles(user, folderId, files, onProgress = () => {}) {
+  requireId(user.id)
+  requireId(folderId)
+  if (!files.length || files.length > 30) throw new Error('Choose between 1 and 30 files at a time.')
+  files.forEach(validateUpload)
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0)
   let completedBytes = 0
   for (const file of files) {
@@ -131,11 +136,12 @@ export async function uploadCloudFiles(user, folderId, files, onProgress = () =>
       report(file.size)
     }
     const { error } = await supabase.from('files').insert({
-      user_id: user.id, folder_id: folderId, name: file.name.slice(0, 255),
+      user_id: user.id, folder_id: folderId, name: cleanName(file.name),
       storage_path: path, mime_type: file.type || 'application/octet-stream', size_bytes: file.size,
     })
     if (error) {
-      await supabase.storage.from('space-files').remove([path])
+      const { error: cleanupError } = await supabase.storage.from('space-files').remove([path])
+      if (cleanupError) throw new Error('Upload could not be saved or cleaned up. Please retry cleanup or contact support.', { cause: error })
       throw error
     }
     completedBytes += file.size
@@ -144,21 +150,28 @@ export async function uploadCloudFiles(user, folderId, files, onProgress = () =>
 }
 
 export async function saveCloudProfile(user, profile) {
-  let storedAvatar = profile.avatarPath ? `storage:${profile.avatarPath}` : profile.avatar
+  const name = cleanName(profile.name, 80)
+  let storedAvatar = safeAvatar(profile.avatarPath ? `storage:${profile.avatarPath}` : profile.avatar, user.id)
+  let newPath = null
+  const oldProfile = must(await supabase.from('profiles').select('avatar_url').eq('id', user.id).single())
+  const oldPath = oldProfile.avatar_url?.startsWith(`storage:${user.id}/`) ? oldProfile.avatar_url.slice(8) : null
   if (profile.avatarFile) {
-    const extension = (profile.avatarFile.name.split('.').pop() || 'webp').replace(/[^a-z0-9]/gi, '').toLowerCase()
-    const path = `${user.id}/${crypto.randomUUID()}.${extension}`
+    const extension = await validateAvatar(profile.avatarFile)
+    const path = `${user.id}/${crypto.randomUUID()}${extension}`
     must(await supabase.storage.from('profile-avatars').upload(path, profile.avatarFile, { contentType: profile.avatarFile.type, upsert: false }))
-    if (profile.avatarPath) await supabase.storage.from('profile-avatars').remove([profile.avatarPath])
+    newPath = path
     storedAvatar = `storage:${path}`
-  } else if (!profile.avatar?.startsWith('blob:') && !profile.avatar?.startsWith('http') && profile.avatarPath) {
-    await supabase.storage.from('profile-avatars').remove([profile.avatarPath])
-    storedAvatar = profile.avatar
   }
-  const row = must(await supabase.from('profiles').upsert({
-    id: user.id, display_name: profile.name.trim(), avatar_url: storedAvatar,
+  const result = await supabase.from('profiles').upsert({
+    id: user.id, display_name: name, avatar_url: storedAvatar,
     notifications: Boolean(profile.notifications), theme: profile.theme === 'pixel-day' ? 'pixel-day' : 'pixel-night',
-  }).select().single())
+  }).select().single()
+  if (result.error) {
+    if (newPath) await supabase.storage.from('profile-avatars').remove([newPath])
+    throw result.error
+  }
+  const row = result.data
+  if (oldPath && storedAvatar !== `storage:${oldPath}`) await supabase.storage.from('profile-avatars').remove([oldPath])
   await logActivity(user, 'Profile updated', row.display_name)
   let avatar = row.avatar_url
   const avatarPath = avatar?.startsWith('storage:') ? avatar.slice(8) : null
@@ -217,14 +230,16 @@ export async function permanentlyDeleteCloudItem(user, item) {
   await logActivity(user, 'Deleted permanently', item.name)
 }
 
-export async function deleteCloudAccount() {
-  const { error } = await supabase.functions.invoke('delete-account', { body: {} })
+export async function deleteCloudAccount(password) {
+  const { error } = await supabase.functions.invoke('delete-account', { body: { password } })
   if (error) throw error
 }
 
-export async function signedFileUrl(item, expiresIn = 300, download = false) {
+export async function signedFileUrl(item, expiresIn = 300, _download = false) {
   if (!item.storagePath) throw new Error('This item has no stored file.')
-  const options = download ? { download: item.name } : undefined
+  if (!Number.isInteger(expiresIn) || expiresIn < 1 || expiresIn > 3600) throw new Error('Links must expire within one hour.')
+  // Shared arbitrary files should download rather than render active HTML/SVG.
+  const options = { download: cleanName(item.name) }
   const data = must(await supabase.storage.from('space-files').createSignedUrl(item.storagePath, expiresIn, options))
   return data.signedUrl
 }

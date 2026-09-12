@@ -8,3 +8,7 @@
 
 The script creates private, user-owned profiles, folders, files and activity records. It also creates a private `space-files` Storage bucket with a 100 MB per-file limit. Files must reference a folder, and every table is protected by Row Level Security.
 
+
+## Security hardening
+
+After the initial setup, apply `migrations/20260911094338_security_hardening.sql` once. Follow [the security deployment guide](../SECURITY.md). Do not rerun the original setup after this migration because it restores the older Storage policies.
