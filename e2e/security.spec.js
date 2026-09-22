@@ -2,11 +2,16 @@ import { test, expect } from '@playwright/test'
 const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const origin='https://sajbwbtqlassnipnbdkk.supabase.co'
 const hostile='<img src=x onerror=alert(1)>'
-async function signedIn(page) {
-  const user={id,email:'test@example.com',aud:'authenticated',role:'authenticated',created_at:new Date().toISOString()}
-  await page.addInitScript(({user,origin})=>{
-    localStorage.setItem(`sb-${new URL(origin).hostname.split('.')[0]}-auth-token`,JSON.stringify({access_token:'test-access-token',refresh_token:'test-refresh-token',expires_at:Math.floor(Date.now()/1000)+3600,user,token_type:'bearer'}))
-  },{user,origin})
+async function signedIn(page, {provider, intentUser, age=0}={}) {
+  const user={id,email:'test@example.com',aud:'authenticated',role:'authenticated',created_at:new Date().toISOString(),identities:provider?[{provider}]:[]}
+  await page.addInitScript(({user,origin,provider,intentUser,age})=>{
+    const now=Math.floor(Date.now()/1000)
+    const encode=value=>btoa(JSON.stringify(value)).replace(/=/g,'').replace(/\+/g,'-').replace(/\//g,'_')
+    const claims={sub:user.id,iss:`${origin}/auth/v1`,aud:'authenticated',role:'authenticated',is_anonymous:false,exp:now+3600,iat:now,amr:[{method:provider?'oauth':'password',timestamp:now-age}]}
+    const token=`${encode({alg:'HS256',typ:'JWT'})}.${encode(claims)}.dGVzdA`
+    localStorage.setItem(`sb-${new URL(origin).hostname.split('.')[0]}-auth-token`,JSON.stringify({access_token:token,refresh_token:'test-refresh-token',expires_at:now+3600,user,token_type:'bearer'}))
+    if(intentUser) sessionStorage.setItem('8bitspace-delete-intent',JSON.stringify({userId:intentUser,startedAt:(now-1)*1000}))
+  },{user,origin,provider,intentUser,age})
   await page.route(`${origin}/**`,async route=>{
     const path=new URL(route.request().url()).pathname
     let data=[]
@@ -22,6 +27,68 @@ test('anonymous visitors cannot see the dashboard; security headers are sent',as
   expect(response.headers()['x-frame-options']).toBe('DENY')
   expect(response.headers()['content-security-policy']).toContain("script-src 'self'")
   expect(response.headers()['referrer-policy']).toBe('no-referrer')
+})
+
+for (const provider of ['google','github']) {
+  test(`${provider} deletion offers provider verification without a password`,async({page})=>{
+    await signedIn(page,{provider})
+    await page.goto('/')
+    await page.getByRole('button',{name:'Open profile photo menu'}).click()
+    await page.getByRole('tab',{name:'Account',exact:true}).click()
+    await page.getByRole('button',{name:'Delete my account'}).click()
+    const dialog=page.getByRole('alertdialog')
+    await expect(dialog.getByLabel('Current password')).toHaveCount(0)
+    await expect(dialog.getByRole('button',{name:`Verify with ${provider==='google'?'Google':'GitHub'}`})).toBeVisible()
+    await dialog.locator('input').fill('DELETE ACCOUNT')
+    await expect(dialog.getByRole('button',{name:'Delete account',exact:true})).toBeDisabled()
+  })
+  test(`${provider} callback requires final confirmation and supports retry after server rejection`,async({page})=>{
+    await page.setViewportSize({width:390,height:844})
+    await signedIn(page,{provider,intentUser:id})
+    const requests=[]
+    await page.route(`${origin}/functions/v1/delete-account`,async route=>{
+      requests.push(route.request().postDataJSON())
+      await route.fulfill({status:401,json:{error:'Please verify with Google or GitHub again, then confirm deletion.'}})
+    })
+    await page.goto('/?auth=callback')
+    const dialog=page.getByRole('alertdialog')
+    await expect(dialog).toBeVisible()
+    expect(requests).toHaveLength(0)
+    await expect(dialog.getByRole('button',{name:'Delete account',exact:true})).toBeDisabled()
+    await dialog.locator('input').fill('DELETE ACCOUNT')
+    await dialog.getByRole('button',{name:'Delete account',exact:true}).click()
+    await expect(dialog.getByRole('alert')).toContainText('verify with Google or GitHub again')
+    expect(requests).toEqual([{password:'',verification:'oauth',expectedUserId:id,confirmation:'DELETE ACCOUNT'}])
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true)
+    await page.screenshot({path:`.browser-check/${provider}-deletion-mobile.png`,fullPage:true,animations:'disabled'})
+  })
+}
+
+for(const scenario of ['different account','expired OAuth','cancelled']) {
+  test(`deletion callback fails safely for ${scenario}`,async({page})=>{
+    await signedIn(page,{provider:'google',intentUser:scenario==='different account'?'other-user':id,age:scenario==='expired OAuth'?3600:0})
+    await page.goto(scenario==='cancelled'?'/?auth=callback&error=access_denied':'/?auth=callback')
+    await expect(page).toHaveURL('http://127.0.0.1:4173/')
+    await expect(page.getByRole('alertdialog')).toHaveCount(0)
+    expect(await page.evaluate(()=>sessionStorage.getItem('8bitspace-delete-intent'))).toBeNull()
+  })
+}
+
+test('successful verified deletion returns to sign-in only after explicit confirmation',async({page})=>{
+  await signedIn(page,{provider:'github',intentUser:id})
+  let deleted=false
+  await page.route(`${origin}/functions/v1/delete-account`,async route=>{
+    deleted=true
+    await route.fulfill({json:{deleted:true}})
+  })
+  await page.goto('/?auth=callback')
+  const dialog=page.getByRole('alertdialog')
+  await expect(dialog).toBeVisible()
+  expect(deleted).toBe(false)
+  await dialog.locator('input').fill('DELETE ACCOUNT')
+  await dialog.getByRole('button',{name:'Delete account',exact:true}).click()
+  await expect(page.getByRole('heading',{name:'Welcome back.'})).toBeVisible()
+  expect(deleted).toBe(true)
 })
 test('short signup passwords are blocked before sending a request',async({page})=>{
   let submitted=false

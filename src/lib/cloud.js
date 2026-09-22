@@ -230,9 +230,13 @@ export async function permanentlyDeleteCloudItem(user, item) {
   await logActivity(user, 'Deleted permanently', item.name)
 }
 
-export async function deleteCloudAccount(password) {
-  const { error } = await supabase.functions.invoke('delete-account', { body: { password } })
-  if (error) throw error
+export async function deleteCloudAccount(password, verification = 'password', expectedUserId) {
+  const { error } = await supabase.functions.invoke('delete-account', { body: { password, verification, expectedUserId, confirmation: 'DELETE ACCOUNT' } })
+  if (error) {
+    let message
+    try { message = (await error.context?.json())?.error } catch { /* Non-JSON gateway response. */ }
+    throw new Error(message || 'Account deletion could not finish. Please try again.')
+  }
 }
 
 export async function signedFileUrl(item, expiresIn = 300, _download = false) {

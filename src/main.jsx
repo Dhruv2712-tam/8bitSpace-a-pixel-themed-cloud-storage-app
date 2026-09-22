@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { startSocialSignIn, authCallbackState, clearAuthCallback } from './lib/auth';
+import { DELETE_INTENT_KEY, deletionProviders, hasRecentOAuth, readDeletionIntent } from './lib/account-deletion';
 import {
   createCloudFolder, deleteCloudAccount, loadCloud, permanentlyDeleteCloudItem, saveCloudProfile, setCloudStar,
   setCloudTrash, signedFileUrl, uploadCloudFiles,
@@ -294,11 +295,25 @@ function RecoveryScreen({ onDone }) {
   return <div className="auth-shell"><PixelLandscape/><div className="atmosphere"/><main className="auth-card"><div className="auth-brand"><LockKeyhole/><div><strong>8bitSpace</strong><span>SECURE RECOVERY</span></div></div><div className="auth-copy"><span>NEW ACCESS KEY</span><h1>Set a new password.</h1><p>Choose at least 12 characters, then sign in again.</p></div><form className="auth-form" onSubmit={submit}><label>New password<input type="password" minLength={12} required autoComplete="new-password" value={password} onChange={e=>setPassword(e.target.value)}/></label><label>Confirm password<input type="password" minLength={12} required autoComplete="new-password" value={confirm} onChange={e=>setConfirm(e.target.value)}/></label>{message&&<p className="auth-message" role="alert">{message}</p>}<button disabled={pending}>{pending?'Saving…':'Set new password'}</button></form></main></div>;
 }
 
-function ConfirmDialog({ title, message, phrase, confirmLabel, onCancel, onConfirm, requirePassword, onSetPassword }) {
+function ConfirmDialog({ title, message, phrase, confirmLabel, onCancel, onConfirm, requirePassword, onSetPassword, providers = [], oauthVerified, onVerify }) {
   const [value,setValue]=useState('');
   const [password,setPassword]=useState('');
   const [pending,setPending]=useState(false);
-  return <div className="profile-modal-layer"><section className="confirm-dialog" role="alertdialog" aria-modal="true"><div className="profile-modal-head"><div><span>PERMANENT ACTION</span><h2>{title}</h2></div><button className="icon-button" onClick={onCancel}><X/></button></div><p>{message}</p><label>Type <b>{phrase}</b> to continue<input autoFocus value={value} onChange={e=>setValue(e.target.value)}/></label>{requirePassword && <label>Current password<input type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label>}{requirePassword && <div className="password-help"><p>Enter your 8bitSpace password, never your Google or GitHub password.</p><button type="button" disabled={pending} onClick={onSetPassword}>Email me a password setup/reset link</button></div>}<div className="confirm-actions"><button onClick={onCancel}>Cancel</button><button className="danger-confirm" disabled={value!==phrase||pending||(requirePassword&&!password)} onClick={async()=>{setPending(true);await onConfirm(password);setPending(false)}}>{pending?'Working…':confirmLabel}</button></div></section></div>
+  const [error,setError]=useState('');
+  const run=async(action)=>{setPending(true);setError('');try{await action()}catch(error){setError(error.message||'Please try again.')}finally{setPending(false)}};
+  return <div className="profile-modal-layer"><section className="confirm-dialog" role="alertdialog" aria-modal="true" aria-label={title}>
+    <div className="profile-modal-head"><div><span>PERMANENT ACTION</span><h2>{title}</h2></div><button className="icon-button" disabled={pending} onClick={onCancel} aria-label="Close confirmation"><X/></button></div>
+    <p>{message}</p>
+    {providers.length > 0 && <div className="password-help">
+      <p>{oauthVerified ? 'Identity verified. Confirm below within 5 minutes.' : 'Verify with your linked account first. You do not need an 8bitSpace password. After returning, you must still confirm deletion.'}</p>
+      {providers.map(provider=><button key={provider} type="button" disabled={pending} onClick={()=>run(()=>onVerify(provider))}>Verify with {provider==='google'?'Google':'GitHub'}</button>)}
+    </div>}
+    <label>Type <b>{phrase}</b> to continue<input autoFocus disabled={pending} value={value} onChange={e=>setValue(e.target.value)}/></label>
+    {requirePassword && <label>Current password<input disabled={pending} type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)}/></label>}
+    {requirePassword && <div className="password-help"><p>Enter your 8bitSpace password, never your Google or GitHub password.</p><button type="button" disabled={pending} onClick={onSetPassword}>Email me a password setup/reset link</button></div>}
+    {error && <p role="alert">{error}</p>}
+    <div className="confirm-actions"><button disabled={pending} onClick={onCancel}>Cancel</button><button className="danger-confirm" disabled={value!==phrase||pending||(requirePassword&&!password)||(providers.length>0&&!oauthVerified)} onClick={()=>run(()=>onConfirm(password))}>{pending?'Working…':confirmLabel}</button></div>
+  </section></div>
 }
 
 function App() {
@@ -333,10 +348,18 @@ function App() {
     if (!supabase) { setAuthLoading(false); return; }
     let activeEffect = true;
     const callback = authCallbackState(location.href);
-    supabase.auth.getSession().then(({data,error})=>{
+    supabase.auth.getSession().then(async({data,error})=>{
       if (!activeEffect) return;
       currentUserId.current=data.session?.user?.id||null;setUser(data.session?.user||null);
       if (callback.isCallback) {
+        const intent = readDeletionIntent(sessionStorage);
+        if (intent && !callback.message && !error && data.session?.user?.id === intent.userId) {
+          const result = await supabase.auth.getClaims(data.session.access_token);
+          if (!activeEffect) return;
+          if (!result.error && hasRecentOAuth(result.data?.claims, intent.userId, Math.floor(Date.now()/1000), Math.floor(intent.startedAt/1000))) {
+            setConfirmation({kind:'account',oauthVerified:true,userId:intent.userId});
+          } else setToast('Verification expired or failed. Open account deletion and verify again.');
+        } else if (intent) setToast('Deletion cancelled: sign-in failed or a different account was selected.');
         setAuthNotice(callback.message || (error || !data.session ? 'Sign-in could not be completed. Please start again in this browser.' : ''));
         history.replaceState({},'',clearAuthCallback(location.href));
       }
@@ -352,7 +375,11 @@ function App() {
   const saveProfile=async(next)=>{try{const saved=await saveCloudProfile(user,next);setProfile(saved);setAvatar(saved.avatar);notify('Profile saved')}catch(err){notify(err.message)}};
   const fileAction=async(action,file)=>{try{if(action==='delete'){setConfirmation({kind:'item',item:file});return}if(action==='share'){const url=await signedFileUrl(file,3600);await navigator.clipboard.writeText(url);notify('Private link copied · expires in 1 hour');return}if(action==='download'){const url=await signedFileUrl(file,300,true);window.open(url,'_blank','noopener,noreferrer');return}if(action==='star'){await setCloudStar(file,!file.starred);await refresh();notify(file.starred?'Removed from starred':'Added to starred');return}await setCloudTrash(user,file,action==='trash');setSelected(null);await refresh();notify(action==='trash'?'Moved to trash':'Item restored')}catch(err){notify(err.message)}};
   const changeEmail=async(email)=>{if(email===profile.email){notify('That is already your email address.');return}const {error}=await supabase.auth.updateUser({email:email.trim()});notify(error?error.message:'Confirmation links sent. Your email changes after verification.')};
-  const runConfirmation=async(password)=>{try{if(confirmation.kind==='account'){await deleteCloudAccount(password);await supabase.auth.signOut();setProfileOpen(false)}else{await permanentlyDeleteCloudItem(user,confirmation.item);setSelected(null);await refresh();notify('Permanently deleted')}setConfirmation(null)}catch(error){notify(error.message||'The action could not be completed.');setConfirmation(null)}};
+  const runConfirmation=async(password)=>{if(confirmation.kind==='account'){if(confirmation.userId!==user.id)throw new Error('Your account changed. Close this dialog and try again.');await deleteCloudAccount(password,deletionProviders(user).length?'oauth':'password',confirmation.userId);await supabase.auth.signOut();setProfileOpen(false)}else{await permanentlyDeleteCloudItem(user,confirmation.item);setSelected(null);await refresh();notify('Permanently deleted')}setConfirmation(null)};
+  const verifyDeletion=async(provider)=>{
+    sessionStorage.setItem(DELETE_INTENT_KEY,JSON.stringify({userId:user.id,startedAt:Date.now()}));
+    try{await startSocialSignIn(provider)}catch(error){sessionStorage.removeItem(DELETE_INTENT_KEY);throw error}
+  };
   useEffect(() => {
     const onKey = (e) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); document.querySelector('.search-box input')?.focus(); } if (e.key === 'Escape') { setSelected(null); setNavOpen(false); } };
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
@@ -377,9 +404,9 @@ function App() {
       </div>
     </main>
     <DetailsPanel file={selected} sourceFiles={files} onClose={() => setSelected(null)} onAction={fileAction} />
-    {profileOpen && <AvatarPicker current={avatar} onSelect={setAvatar} onClose={() => setProfileOpen(false)} profile={profile} onSave={saveProfile} onSignOut={async()=>{setProfileOpen(false);await supabase.auth.signOut()}} onResetPassword={async()=>{const {error}=await supabase.auth.resetPasswordForEmail(profile.email,{redirectTo:`${location.origin}/?recovery=1`});notify(error?error.message:'Password-reset email sent')}} onChangeEmail={changeEmail} onDeleteAccount={()=>{setProfileOpen(false);setConfirmation({kind:'account'})}} />}
+    {profileOpen && <AvatarPicker current={avatar} onSelect={setAvatar} onClose={() => setProfileOpen(false)} profile={profile} onSave={saveProfile} onSignOut={async()=>{setProfileOpen(false);await supabase.auth.signOut()}} onResetPassword={async()=>{const {error}=await supabase.auth.resetPasswordForEmail(profile.email,{redirectTo:`${location.origin}/?recovery=1`});notify(error?error.message:'Password-reset email sent')}} onChangeEmail={changeEmail} onDeleteAccount={()=>{setProfileOpen(false);setConfirmation({kind:'account',userId:user.id})}} />}
     {createOpen && <CreateDialog onClose={()=>setCreateOpen(false)} onCreateFolder={createFolder} onUpload={uploadFiles} folders={rootFolders} currentFolder={folderStack.at(-1)||null}/>}
-    {confirmation&&<ConfirmDialog onSetPassword={async()=>{const {error}=await supabase.auth.resetPasswordForEmail(user.email,{redirectTo:`${location.origin}/?recovery=1`});notify(error?'Could not send the password email. Please try again.':'Check your email to set or reset your 8bitSpace password.')}} requirePassword={confirmation.kind==='account'} title={confirmation.kind==='account'?'Delete your account?':`Delete ${confirmation.item.name}?`} message={confirmation.kind==='account'?'This permanently deletes your profile, every folder, every file, and all stored avatars. This cannot be undone.':'The item and its stored data will be removed forever. This cannot be undone.'} phrase={confirmation.kind==='account'?'DELETE ACCOUNT':'DELETE'} confirmLabel={confirmation.kind==='account'?'Delete account':'Delete forever'} onCancel={()=>setConfirmation(null)} onConfirm={runConfirmation}/>}
+    {confirmation&&<ConfirmDialog onSetPassword={async()=>{const {error}=await supabase.auth.resetPasswordForEmail(user.email,{redirectTo:`${location.origin}/?recovery=1`});notify(error?'Could not send the password email. Please try again.':'Check your email to set or reset your 8bitSpace password.')}} providers={confirmation.kind==='account'?deletionProviders(user):[]} oauthVerified={confirmation.oauthVerified&&confirmation.userId===user.id} onVerify={verifyDeletion} requirePassword={confirmation.kind==='account'&&!deletionProviders(user).length} title={confirmation.kind==='account'?'Delete your account?':`Delete ${confirmation.item.name}?`} message={confirmation.kind==='account'?'This permanently deletes your profile, every folder, every file, and all stored avatars. This cannot be undone.':'The item and its stored data will be removed forever. This cannot be undone.'} phrase={confirmation.kind==='account'?'DELETE ACCOUNT':'DELETE'} confirmLabel={confirmation.kind==='account'?'Delete account':'Delete forever'} onCancel={()=>setConfirmation(null)} onConfirm={runConfirmation}/>}
     {uploadProgress&&<div className="upload-progress" role="status"><div><span>UPLOADING</span><b>{uploadProgress.name}</b></div><strong>{uploadProgress.percent}%</strong><div className="progress-track"><i style={{width:`${uploadProgress.percent}%`}}/></div></div>}
     {toast && <div className="toast" role="status"><Cloud size={16}/>{toast}</div>}
     <button className="floating-create" aria-label="Create new" onClick={()=>setCreateOpen(true)}><Plus /></button>

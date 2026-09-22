@@ -58,22 +58,38 @@ export function createDeleteHandler({ createClient, env }) {
     try {
       let body
       try { body = await readBody(request) } catch { return reply({ error: 'Invalid request body' }, 400) }
-      if (typeof body?.password !== 'string' || !body.password || body.password.length > 1024) return reply({ error: 'Current password required' }, 400)
+      if (body?.confirmation !== 'DELETE ACCOUNT') return reply({ error: 'Type DELETE ACCOUNT to confirm' }, 400)
+      const oauth = body.verification === 'oauth'
+      if (!oauth && (typeof body?.password !== 'string' || !body.password || body.password.length > 1024)) return reply({ error: 'Current password required' }, 400)
       const url = env('SUPABASE_URL'), anon = env('SUPABASE_ANON_KEY'), secret = env('SUPABASE_SERVICE_ROLE_KEY')
       if (!url || !anon || !secret) return reply({ error: 'Service unavailable' }, 503)
       const options = { auth: { persistSession: false, autoRefreshToken: false } }
       const userClient = createClient(url, anon, { ...options, global: { headers: { Authorization: authorization } } })
       const { data: { user }, error } = await userClient.auth.getUser()
       if (error || !user?.email) return reply({ error: 'Invalid session' }, 401)
+      if (oauth && body.expectedUserId !== user.id) return reply({ error: 'Your account changed. Close this dialog and try again.' }, 401)
       const admin = createClient(url, secret, options)
       const limit = await admin.rpc('consume_delete_attempt', { actor: user.id })
       if (limit.error) return reply({ error: 'Service unavailable' }, 503)
       if (!limit.data) return reply({ error: 'Too many attempts. Try again in a minute.' }, 429)
-      const verifier = createClient(url, anon, options)
-      const verified = await verifier.auth.signInWithPassword({ email: user.email, password: body.password })
-      if (verified.error || verified.data.user?.id !== user.id) return reply({ error: 'Password verification failed' }, 401)
-      // Remove the temporary verification session before any destructive work.
-      await verifier.auth.signOut({ scope: 'local' })
+      if (oauth) {
+        const { data, error: claimsError } = await userClient.auth.getClaims(authorization.slice(7))
+        const claims = data?.claims
+        const now = Math.floor(Date.now() / 1000)
+        // Use the signed authentication event, not iat/last_sign_in_at: refreshing
+        // an old session must never count as a fresh provider sign-in.
+        const recentOAuth = !claimsError && claims?.sub === user.id && claims?.is_anonymous === false &&
+          Array.isArray(claims.amr) && claims.amr.some(entry => entry?.method === 'oauth' &&
+            Number.isInteger(entry.timestamp) && entry.timestamp <= now && entry.timestamp >= now - 300)
+        const socialIdentity = user.identities?.some(identity => ['google', 'github'].includes(identity.provider))
+        if (!recentOAuth || !socialIdentity) return reply({ error: 'Please verify with Google or GitHub again, then confirm deletion.' }, 401)
+      } else {
+        const verifier = createClient(url, anon, options)
+        const verified = await verifier.auth.signInWithPassword({ email: user.email, password: body.password })
+        // Clean up even when verification returned a different account.
+        if (verified.data?.session) await verifier.auth.signOut({ scope: 'local' })
+        if (verified.error || verified.data.user?.id !== user.id) return reply({ error: 'Password verification failed' }, 401)
+      }
       await removeOwnedObjects(admin.storage, 'space-files', user.id)
       await removeOwnedObjects(admin.storage, 'profile-avatars', user.id)
       const revoked = await admin.auth.admin.signOut(authorization.slice(7), 'global')
