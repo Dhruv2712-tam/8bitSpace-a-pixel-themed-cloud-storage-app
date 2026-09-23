@@ -6,13 +6,6 @@ export function deletionProviders(user) {
 }
 
 // Only call with claims returned by auth.getClaims(), never a decoded/unverified JWT.
-export function hasRecentOAuth(claims, userId, now = Math.floor(Date.now() / 1000), since = now - DELETE_VERIFICATION_SECONDS) {
-  return claims?.sub === userId && claims?.is_anonymous === false &&
-    Array.isArray(claims.amr) && claims.amr.some(entry =>
-      entry?.method === 'oauth' && Number.isInteger(entry.timestamp) &&
-      entry.timestamp <= now && entry.timestamp >= Math.max(since, now - DELETE_VERIFICATION_SECONDS))
-}
-
 export function readDeletionIntent(storage, now = Date.now()) {
   const raw = storage.getItem(DELETE_INTENT_KEY)
   storage.removeItem(DELETE_INTENT_KEY)

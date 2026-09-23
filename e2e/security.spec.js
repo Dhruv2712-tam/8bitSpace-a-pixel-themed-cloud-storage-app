@@ -64,15 +64,26 @@ for (const provider of ['google','github']) {
   })
 }
 
-for(const scenario of ['different account','expired OAuth','cancelled']) {
+for(const scenario of ['different account','cancelled']) {
   test(`deletion callback fails safely for ${scenario}`,async({page})=>{
-    await signedIn(page,{provider:'google',intentUser:scenario==='different account'?'other-user':id,age:scenario==='expired OAuth'?3600:0})
+    await signedIn(page,{provider:'google',intentUser:scenario==='different account'?'other-user':id})
     await page.goto(scenario==='cancelled'?'/?auth=callback&error=access_denied':'/?auth=callback')
     await expect(page).toHaveURL('http://127.0.0.1:4173/')
     await expect(page.getByRole('alertdialog')).toHaveCount(0)
     expect(await page.evaluate(()=>sessionStorage.getItem('8bitspace-delete-intent'))).toBeNull()
   })
 }
+
+test('a returned OAuth callback reaches confirmation when local claims lookup is unreliable',async({page})=>{
+  await signedIn(page,{provider:'google',intentUser:id,age:3600})
+  await page.route(`${origin}/functions/v1/delete-account`,route=>route.fulfill({status:401,json:{error:'Please verify with Google or GitHub again, then confirm deletion.'}}))
+  await page.goto('/?auth=callback')
+  const dialog=page.getByRole('alertdialog')
+  await expect(dialog).toBeVisible()
+  await dialog.locator('input').fill('DELETE ACCOUNT')
+  await dialog.getByRole('button',{name:'Delete account',exact:true}).click()
+  await expect(dialog.getByRole('alert')).toContainText('verify with Google or GitHub again')
+})
 
 test('successful verified deletion returns to sign-in only after explicit confirmation',async({page})=>{
   await signedIn(page,{provider:'github',intentUser:id})

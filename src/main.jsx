@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { startSocialSignIn, authCallbackState, clearAuthCallback } from './lib/auth';
-import { DELETE_INTENT_KEY, deletionProviders, hasRecentOAuth, readDeletionIntent } from './lib/account-deletion';
+import { DELETE_INTENT_KEY, deletionProviders, readDeletionIntent } from './lib/account-deletion';
 import {
   createCloudFolder, deleteCloudAccount, loadCloud, permanentlyDeleteCloudItem, saveCloudProfile, setCloudStar,
   setCloudTrash, signedFileUrl, uploadCloudFiles,
@@ -354,11 +354,9 @@ function App() {
       if (callback.isCallback) {
         const intent = readDeletionIntent(sessionStorage);
         if (intent && !callback.message && !error && data.session?.user?.id === intent.userId) {
-          const result = await supabase.auth.getClaims(data.session.access_token);
-          if (!activeEffect) return;
-          if (!result.error && hasRecentOAuth(result.data?.claims, intent.userId, Math.floor(Date.now()/1000), Math.floor(intent.startedAt/1000))) {
-            setConfirmation({kind:'account',oauthVerified:true,userId:intent.userId});
-          } else setToast('Verification expired or failed. Open account deletion and verify again.');
+          // The Edge Function verifies the signed OAuth AMR and its age before deleting.
+          // A browser claims lookup can fail even after a successful provider callback.
+          setConfirmation({kind:'account',oauthVerified:true,userId:intent.userId});
         } else if (intent) setToast('Deletion cancelled: sign-in failed or a different account was selected.');
         setAuthNotice(callback.message || (error || !data.session ? 'Sign-in could not be completed. Please start again in this browser.' : ''));
         history.replaceState({},'',clearAuthCallback(location.href));
